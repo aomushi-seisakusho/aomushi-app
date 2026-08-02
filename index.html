@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14151c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="製作所">
+<title>あおむし製作所</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header class="bar">
+  <i class="logo"></i>
+  <span class="co">あおむし製作所</span>
+  <button id="refresh" class="icobtn" aria-label="更新">⟳</button>
+  <button id="opensetup" class="icobtn" aria-label="設定">⚙</button>
+</header>
+
+<div id="stale" class="stale" hidden></div>
+
+<main>
+
+  <!-- ============ 工場 ============ -->
+  <section id="view-factory" class="view">
+    <div class="chips" id="chips"></div>
+
+    <div class="stage">
+      <div class="stagehead">
+        <span>社屋</span>
+        <button id="zoom" class="mini-btn">拡大</button>
+      </div>
+      <div class="isowrap" id="isowrap"><div class="isoinner" id="iso"></div></div>
+    </div>
+
+    <div class="housou" id="housou" hidden><i class="spk"></i><span></span></div>
+
+    <section class="panel">
+      <h2>決裁デスク</h2>
+      <ul class="inbox" id="inboxtasks"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>社員名簿</h2>
+      <ul class="roster" id="roster"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>今日のタイムライン</h2>
+      <ul class="feed" id="feed"></ul>
+    </section>
+
+    <p class="note" id="gen"></p>
+  </section>
+
+  <!-- ============ 社内便 ============ -->
+  <section id="view-mail" class="view" hidden>
+    <section class="panel">
+      <h2>係からの返事</h2>
+      <ul class="mail" id="mail"></ul>
+    </section>
+    <section class="panel">
+      <h2>編集長が送った分</h2>
+      <ul class="mail" id="sent"></ul>
+    </section>
+    <p class="note">第1期は読み取りだけ。送信ボタンは第2期でここに付く。</p>
+  </section>
+
+  <!-- ============ 台帳 ============ -->
+  <section id="view-ledger" class="view" hidden>
+    <div class="ltools">
+      <input id="q" type="search" placeholder="本文・日付で探す" autocomplete="off">
+      <div class="segs" id="sortsegs">
+        <button data-sort="views" class="on">views順</button>
+        <button data-sort="rate">いいね率順</button>
+        <button data-sort="date">新しい順</button>
+      </div>
+    </div>
+    <p class="note" id="lstat"></p>
+    <ul class="ltable" id="ltable"></ul>
+    <button id="more" class="more" hidden>もっと見る</button>
+    <p class="note">views未取得の行は順位づけに使わない。判定は views と いいね率の2軸だけ。<br>型は <code>handclass_top50.md</code> / <code>handclass_random50.md</code> の手分類のみ。それ以外は「未分類」と出す（自動判定は上位50本の56%を取り違えた実績がある）。</p>
+  </section>
+
+  <!-- ============ 設定 ============ -->
+  <section id="view-setup" class="view" hidden>
+    <section class="panel">
+      <h2>つなぎ先</h2>
+      <p class="note" style="margin:0 0 10px">
+        会社のデータは非公開の金庫（GitHubの非公開リポジトリ）に置いてある。
+        鍵（トークン）をここに1回だけ貼れば、この画面が金庫の中身を読む。
+        鍵はこの端末の中にだけ残る。誰にも送らない。
+      </p>
+      <label class="fld"><span>持ち主の名前（GitHubのユーザー名）</span>
+        <input id="s-owner" type="text" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="fld"><span>金庫の名前（リポジトリ）</span>
+        <input id="s-repo" type="text" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="fld"><span>鍵（トークン）</span>
+        <input id="s-token" type="password" autocapitalize="off" autocorrect="off" spellcheck="false"
+               placeholder="github_pat_ で始まる長い文字列"></label>
+      <div class="btnrow">
+        <button id="s-save" class="btn">保存してつなぐ</button>
+        <button id="s-clear" class="btn ghost">鍵を消す</button>
+      </div>
+      <p class="note" id="s-msg"></p>
+    </section>
+  </section>
+
+</main>
+
+<nav class="tabs">
+  <button data-tab="factory" class="on"><b>工</b><span>工場</span></button>
+  <button data-tab="mail"><b>便</b><span>社内便</span><i class="dot" id="maildot" hidden></i></button>
+  <button data-tab="ledger"><b>帳</b><span>台帳</span></button>
+</nav>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

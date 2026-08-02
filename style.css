@@ -1,0 +1,160 @@
+/* あおむし製作所 PWA — 社屋(dashboard)と同じ配色。スマホ縦持ち前提。 */
+:root{
+  --bg:#14151c; --panel:#1c1e2a; --line:#3a3f55; --ink:#dfe3f0; --dim:#9aa1bd;
+  --sub:#c7cde0; --green:#7DDB84; --amber:#E8C15A; --d:#4FC3F7; --a:#F06292;
+  --b:#D4C34A; --c:#8a8fa8; --red:#F06262;
+  --safeb:env(safe-area-inset-bottom,0px); --safet:env(safe-area-inset-top,0px);
+  --tabh:58px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{
+  background:var(--bg);color:var(--ink);
+  font-family:"DotGothic16","Hiragino Kaku Gothic ProN","Hiragino Sans",system-ui,monospace;
+  font-size:13px;line-height:1.7;
+  padding-bottom:calc(var(--tabh) + var(--safeb) + 12px);
+  -webkit-text-size-adjust:100%;overscroll-behavior-y:contain;
+}
+button,input{font:inherit;color:inherit}
+
+/* ---- 上のバー ---- */
+.bar{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
+  padding:calc(var(--safet) + 9px) 12px 9px;
+  background:var(--panel);border-bottom:2px solid var(--line);
+}
+.logo{width:14px;height:14px;background:var(--green);border:2px solid #101018;flex:none}
+.co{font-size:15px;letter-spacing:.1em;flex:1;min-width:0}
+.icobtn{width:34px;height:34px;flex:none;background:var(--bg);border:1px solid var(--line);
+  font-size:16px;line-height:1;color:var(--dim)}
+.icobtn:active{background:#22242f}
+.icobtn.spin{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.stale{margin:0;padding:7px 12px;background:#332a16;border-bottom:1px solid var(--amber);
+  color:var(--amber);font-size:11.5px}
+
+main{padding:10px 10px 0}
+.view{display:block}
+.view[hidden]{display:none}
+
+/* ---- 見出しつきの箱 ---- */
+.panel{border:2px solid var(--line);background:var(--panel);padding:10px 11px;margin-top:10px}
+.panel h2{font-size:11.5px;letter-spacing:.18em;color:var(--dim);font-weight:400;
+  border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:9px}
+.note{font-size:10.5px;color:#8a8fa8;margin-top:8px;line-height:1.6}
+
+/* ---- チップ（在庫など） ---- */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--panel);padding:3px 9px;font-size:11.5px;white-space:nowrap}
+.chip b{color:var(--green);font-weight:400}
+.chip.warn{border-color:var(--amber)}
+.chip.warn b{color:var(--amber)}
+
+/* ---- 社屋 ---- */
+.stage{border:2px solid var(--line);background:#151420;margin-top:10px}
+.stagehead{display:flex;align-items:center;justify-content:space-between;
+  padding:5px 9px;border-bottom:1px solid var(--line);font-size:11px;color:var(--dim);letter-spacing:.18em}
+.mini-btn{background:var(--bg);border:1px solid var(--line);color:var(--dim);
+  font-size:11px;padding:2px 10px;letter-spacing:.05em}
+.mini-btn.on{border-color:var(--green);color:var(--green)}
+.isowrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.isoinner{width:100%}
+.isowrap.zoom .isoinner{width:210%}
+.isoinner svg{width:100%;height:auto;display:block}
+.isoskel{height:190px;display:grid;place-items:center;color:#4a5170;font-size:11px}
+
+/* ---- 社内放送 ---- */
+.housou{display:flex;gap:9px;align-items:center;border:2px solid var(--line);
+  background:var(--panel);padding:8px 11px;margin-top:10px;font-size:11.5px;color:var(--sub)}
+.housou .spk{width:9px;height:9px;background:var(--amber);flex:none;animation:bl 1.6s infinite}
+@keyframes bl{50%{opacity:.25}}
+
+/* ---- 決裁デスク ---- */
+.inbox{list-style:none}
+.inbox li{font-size:12px;padding:5px 0 5px 24px;position:relative;color:var(--sub);
+  border-bottom:1px solid #2a2d3f}
+.inbox li:last-child{border-bottom:0}
+.inbox li::before{content:"未";position:absolute;left:0;top:8px;font-size:9px;
+  border:1px solid var(--amber);color:var(--amber);padding:0 3px;line-height:1.4}
+.empty{font-size:11.5px;color:#6d7390;padding:6px 0}
+
+/* ---- 社員名簿 ---- */
+.roster{list-style:none;display:grid;gap:7px}
+.roster li{border:1px solid #101018;background:#191720;padding:7px 9px}
+.roster b{font-weight:400;font-size:12px;display:flex;align-items:center;gap:7px}
+.roster em{font-style:normal;font-size:10px;color:var(--dim);margin-left:auto}
+.roster p{font-size:11.5px;color:var(--sub);margin-top:2px}
+.lampdot{width:7px;height:7px;flex:none}
+.lg{background:var(--green);animation:bl 2.2s infinite}
+.ly{background:var(--amber);animation:bl 1s infinite}
+
+/* ---- タイムライン ---- */
+.feed{list-style:none}
+.feed li{font-size:11.5px;padding:5px 0;border-bottom:1px solid #2a2d3f;color:var(--sub)}
+.feed li:last-child{border-bottom:0}
+.feed span{color:var(--green);margin-right:8px;font-size:10.5px}
+
+/* ---- 社内便 ---- */
+.mail{list-style:none;display:grid;gap:8px}
+.mail li{border:1px solid #101018;background:#191720;padding:8px 9px}
+.mail .mh{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim)}
+.mail .who{border:1px solid var(--line);padding:0 6px;font-size:10.5px}
+.mail .mt{margin-left:auto;font-size:10.5px;color:#6d7390}
+.mail .mb{font-size:12px;color:var(--ink);margin-top:5px;white-space:pre-wrap;word-break:break-word}
+
+/* ---- 台帳 ---- */
+.ltools{display:grid;gap:7px}
+#q{width:100%;background:var(--panel);border:1px solid var(--line);padding:8px 10px;
+  font-size:13px;-webkit-appearance:none;border-radius:0}
+.segs{display:flex;gap:0;border:1px solid var(--line)}
+.segs button{flex:1;background:var(--panel);border:0;border-right:1px solid var(--line);
+  padding:7px 0;font-size:11.5px;color:var(--dim)}
+.segs button:last-child{border-right:0}
+.segs button.on{background:#2a2d3f;color:var(--ink)}
+.ltable{list-style:none;display:grid;gap:6px;margin-top:4px}
+.ltable li{border:1px solid #101018;background:#191720;padding:7px 9px}
+.ltable li.dim{opacity:.55}
+.lh{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--dim)}
+.tag{font-size:9.5px;padding:0 5px;border:1px solid;line-height:1.5}
+.lx{font-size:12px;color:var(--sub);margin:4px 0 5px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lnums{display:flex;gap:12px;font-size:11.5px}
+.lnums i{font-style:normal;color:#6d7390;margin-right:4px;font-size:10px}
+.lnums b{font-weight:400}
+.tag.untyped{border-color:#3a3f55;color:#5b6076}
+.miss{color:#666c85;font-size:11px}
+.more{width:100%;margin-top:10px;background:var(--panel);border:1px solid var(--line);
+  color:var(--dim);padding:10px;font-size:12px}
+
+/* ---- 設定 ---- */
+.fld{display:block;margin-bottom:10px}
+.fld span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px}
+.fld input{width:100%;background:var(--bg);border:1px solid var(--line);padding:9px 10px;
+  font-size:14px;-webkit-appearance:none;border-radius:0}
+.btnrow{display:flex;gap:8px}
+.btn{flex:1;background:var(--green);color:#101018;border:0;padding:11px;font-size:13px;letter-spacing:.05em}
+.btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
+.btn:active{opacity:.75}
+#s-msg.ok{color:var(--green)}
+#s-msg.ng{color:var(--red)}
+
+/* ---- 下のタブ ---- */
+.tabs{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;
+  background:var(--panel);border-top:2px solid var(--line);
+  padding-bottom:var(--safeb);
+}
+.tabs button{
+  flex:1;background:none;border:0;padding:7px 0 6px;display:grid;gap:1px;justify-items:center;
+  color:#6d7390;position:relative;height:var(--tabh)
+}
+.tabs button b{font-weight:400;font-size:15px;width:24px;height:24px;display:grid;place-items:center;
+  border:1px solid #3a3f55;line-height:1}
+.tabs button span{font-size:10px;letter-spacing:.06em}
+.tabs button.on{color:var(--green)}
+.tabs button.on b{border-color:var(--green)}
+.tabs .dot{position:absolute;top:5px;right:calc(50% - 18px);width:7px;height:7px;
+  background:var(--amber);animation:bl 1.4s infinite}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
