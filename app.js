@@ -253,6 +253,43 @@ function staleCheck(g) {
     : '');
 }
 
+/* 係の返事は Markdown で来る。スマホで生のパイプ記号を読ませない。
+   太字・見出し・箇条書き・表だけ起こす。必ず esc() を通してから組み立てる（HTMLは入れさせない）。 */
+function mdlite(src) {
+  const inline = (s) => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  const rows = (l) => l.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  const out = [];
+  const lines = String(src || '').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(l)) {                       // 表：|…|…| が続くあいだ
+      const tb = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) tb.push(lines[i++]);
+      const body = tb.filter((r) => !/^\s*\|[\s|:-]+\|\s*$/.test(r));   // ---の行は捨てる
+      out.push('<div class="tw"><table>' + body.map((r, n) =>
+        '<tr>' + rows(r).map((c) =>
+          `<${n ? 'td' : 'th'}>${inline(c)}</${n ? 'td' : 'th'}>`).join('') + '</tr>').join('')
+        + '</table></div>');
+      continue;
+    }
+    if (/^\s*(#{1,6})\s+/.test(l)) { out.push(`<h4>${inline(l.replace(/^\s*#+\s+/, ''))}</h4>`); i++; continue; }
+    if (/^\s*[-*・]\s+/.test(l)) {                         // 箇条書き：続くあいだ束ねる
+      const li = [];
+      while (i < lines.length && /^\s*[-*・]\s+/.test(lines[i]))
+        li.push(`<li>${inline(lines[i++].replace(/^\s*[-*・]\s+/, ''))}</li>`);
+      out.push(`<ul class="mdl">${li.join('')}</ul>`);
+      continue;
+    }
+    if (!l.trim()) { out.push('<div class="msp"></div>'); i++; continue; }
+    out.push(`<p>${inline(l)}</p>`);
+    i++;
+  }
+  return out.join('');
+}
+
 function renderMail(st) {
   const line = (m, dir) => {
     const who = dir === 'in'
@@ -264,7 +301,7 @@ function renderMail(st) {
       <div class="mh"><span class="who">${esc(who)}</span>
         ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
         <span class="mt">${esc(t)}</span></div>
-      <div class="mb">${esc(m.body || '')}</div>
+      <div class="mb">${dir === 'in' ? mdlite(m.body) : esc(m.body || '')}</div>
       ${m.pending ? '<div class="pnote">金庫に置いた。次にMacが動いたときに係が読む。</div>' : ''}
       </li>`;
   };
@@ -276,7 +313,7 @@ function renderMail(st) {
   const out = pend.map((m) => ({ ...m, pending: true })).concat(sent);
 
   $('#mail').innerHTML = mail.length ? mail.map((m) => line(m, 'in')).join('')
-    : '<li class="empty">返事はまだ無い。（第3期で係が返事を書くようになる）</li>';
+    : '<li class="empty">返事はまだ無い。手紙を出せば、次にMacが動いたときに係が読む。</li>';
   $('#sent').innerHTML = out.length ? out.map((m) => line(m, 'out')).join('')
     : '<li class="empty">まだ何も送っていない。</li>';
   $('#maildot').hidden = mail.length === 0;

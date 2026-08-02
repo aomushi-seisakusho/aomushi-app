@@ -1,5 +1,5 @@
 /* 圏外でも画面の枠だけは出るようにする。会社のデータ（api.github.com）は絶対にキャッシュしない。 */
-const V = 'aomushi-v7';   // 枠のファイルを触ったら必ず上げる（v7＝QRから鍵が自分で入る）
+const V = 'aomushi-v8';   // 枠のファイルを触ったら必ず上げる（v8＝係の返事をMarkdownで起こす）
 const SHELL = [
   './', './index.html', './style.css', './app.js', './config.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png',
