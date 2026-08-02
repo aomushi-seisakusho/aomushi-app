@@ -162,6 +162,11 @@ main{padding:10px 10px 0}
 .btn[disabled]{opacity:.45}
 #s-msg.ok,#m-msg.ok{color:var(--green)}
 #s-msg.ng,#m-msg.ng{color:var(--red)}
+/* 端末に何が入っているかの実況。ここだけは推測でなく事実を出す */
+.keystate{border:1px solid var(--line);background:var(--bg);padding:8px 10px;margin:0 0 10px;
+  font-size:11.5px;line-height:1.75;word-break:break-all}
+.keystate.ok{color:var(--green);border-color:#2f5c39}
+.keystate.ng{color:var(--amber);border-color:#5c4f2a}
 .mail li.pending{border-left:2px solid var(--amber)}
 
 /* ---- 下のタブ ---- */

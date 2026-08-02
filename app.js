@@ -21,6 +21,23 @@ const cfg = () => ({
   token:  localStorage.getItem(LS.token) || '',
 });
 
+/* 黄色い帯は「この端末に鍵があるか」だけで決まる。通信の成否では動かさない。
+   以前は refresh() が最後まで通ったときだけ消す作りで、社屋の絵が1枚読めない等の
+   鍵と関係ない失敗があると、鍵を入れたあとも帯が消えないまま固まっていた。 */
+function hasKey() {
+  const c = cfg();
+  return !!(c.token && c.owner && c.repo);
+}
+function paintKeyBanner() {
+  const el = document.getElementById('nokey');
+  if (el) el.hidden = hasKey();
+}
+
+// localStorage は端末の設定次第で書けないことがある。黙って死なせない
+function put(k, v) {
+  try { localStorage.setItem(k, v); return true; } catch (_) { return false; }
+}
+
 const $  = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const esc = (s) => String(s == null ? '' : s)
@@ -116,14 +133,34 @@ function show(name) {
 
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 
+/* 端末に何が入っているかを言葉で出す。鍵そのものは出さず、頭と長さだけ。
+   「入れたはずなのに」を推測で潰さないための、唯一の手がかり */
+function paintKeyState() {
+  const c = cfg();
+  const el = $('#s-state');
+  if (!el) return;
+  let probe = 'この端末は保存できる';
+  if (!put('aomushi.probe', '1')) probe = 'この端末は保存できない（設定でサイトのデータが止められている）';
+  else localStorage.removeItem('aomushi.probe');
+  el.innerHTML = [
+    c.token
+      ? `鍵：<b>入っている</b>（${esc(c.token.slice(0, 11))}… 全${c.token.length}文字）`
+      : '鍵：<b>入っていない</b>',
+    `持ち主：${esc(c.owner || '未設定')}／金庫：${esc(c.repo || '未設定')}`,
+    probe,
+  ].join('<br>');
+  el.className = 'note keystate ' + (c.token ? 'ok' : 'ng');
+}
+
 function openSetup(focus) {
   const c = cfg();
   // 置き換え前のひな形（__OWNER__）は空欄として出す
   $('#s-owner').value = /^__/.test(c.owner) ? '' : c.owner;
   $('#s-repo').value  = c.repo;
   $('#s-token').value = '';
-  $('#s-msg').textContent = c.token ? '鍵は保存済み。貼り直すときだけ入力する。' : '';
+  $('#s-msg').textContent = c.token ? '貼り直すときだけ鍵の欄に入力する。' : '';
   $('#s-msg').className = 'note';
+  paintKeyState();
   show('setup');
   // すでに設定画面に居るときに⚙を押しても見た目が変わらず「効いていない」と読める。
   // 押した手応えとして、鍵の欄に必ずカーソルを入れる
@@ -177,13 +214,11 @@ function renderState(st) {
 }
 
 function staleCheck(g) {
-  const el = $('#stale');
-  if (!g) { el.hidden = true; return; }
+  if (!g) { bar(''); return; }
   const hrs = (Date.now() - g.getTime()) / 3.6e6;
-  if (hrs > 26) {
-    el.hidden = false;
-    el.textContent = `工場の情報が${Math.floor(hrs / 24)}日前のまま。Macが止まっているかもしれない。`;
-  } else el.hidden = true;
+  bar(hrs > 26
+    ? `工場の情報が${Math.floor(hrs / 24)}日前のまま。Macが止まっているかもしれない。`
+    : '');
 }
 
 function renderMail(st) {
@@ -222,18 +257,14 @@ const loadPending = () => {
   const v = jparse(localStorage.getItem(LS.pend), []);
   return Array.isArray(v) ? v : [];
 };
-const savePending = (a) => {
-  try { localStorage.setItem(LS.pend, JSON.stringify(a.slice(0, 30))); } catch (_) { /* 無視 */ }
-};
+const savePending = (a) => put(LS.pend, JSON.stringify(a.slice(0, 30)));
 
 let ST = null;   // 最後に読めた会社の姿。送った直後に画面だけ描き直すのに使う
 
 const draftFields = () => ({
   to: $('#m-to').value, subject: $('#m-subject').value, body: $('#m-body').value,
 });
-function saveDraft() {
-  try { localStorage.setItem(LS.draft, JSON.stringify(draftFields())); } catch (_) { /* 無視 */ }
-}
+function saveDraft() { put(LS.draft, JSON.stringify(draftFields())); }
 function restoreDraft() {
   const d = jparse(localStorage.getItem(LS.draft), null);
   if (!d) return;
@@ -364,16 +395,31 @@ $('#zoom').addEventListener('click', () => {
 
 /* ================= 読み込み ================= */
 
+function bar(text) {
+  const el = $('#stale');
+  if (text) { el.hidden = false; el.textContent = text; } else { el.hidden = true; }
+}
+
 async function refresh(quiet) {
   const btn = $('#refresh');
   btn.classList.add('spin');
+  paintKeyBanner();
   try {
-    const [sTxt, svg] = await Promise.all([pull('state/state.json'), pull('state/factory.svg')]);
+    if (!hasKey()) throw new NoKey('鍵がまだ入っていない');
+    // 社屋の絵が1枚読めないだけで会社ごと映らなくなるのは割に合わない。別々に扱う
+    const [sr, gr] = await Promise.allSettled([
+      pull('state/state.json'), pull('state/factory.svg')]);
+    if (sr.status === 'rejected') throw sr.reason;
+    const sTxt = sr.value;
     const st = JSON.parse(sTxt);
-    try { localStorage.setItem(LS.state, sTxt); } catch (_) { /* 容量超過は無視 */ }
-    $('#nokey').hidden = true;
-    renderState(st);
-    $('#iso').innerHTML = svg;
+    put(LS.state, sTxt);
+    renderState(st);                      // 中で staleCheck が帯を出し入れする
+    if (gr.status === 'fulfilled') {
+      $('#iso').innerHTML = gr.value;
+    } else {
+      $('#iso').innerHTML = '<div class="isoskel">社屋の絵だけ取りに行けなかった</div>';
+      bar(`社屋の絵が読めない：${gr.reason.message}`);
+    }
     if (ledgerLoaded) { ledgerLoaded = false; if (!$('#view-ledger').hidden) loadLedger(); }
   } catch (e) {
     const cached = localStorage.getItem(LS.state);
@@ -381,15 +427,14 @@ async function refresh(quiet) {
       try { renderState(JSON.parse(cached)); } catch (_) { /* 壊れたキャッシュは捨てる */ }
     }
     if (e instanceof NoKey) {
-      $('#nokey').hidden = false;
       $('#iso').innerHTML = '<div class="isoskel">鍵を入れると社屋が映る</div>';
       if (!quiet) openSetup(false);
     } else {
-      $('#stale').hidden = false;
-      $('#stale').textContent = `つながらない：${e.message}${cached ? '（前に読んだ内容を表示中）' : ''}`;
+      bar(`つながらない：${e.message}${cached ? '（前に読んだ内容を表示中）' : ''}`);
       if (!$('#iso').innerHTML) $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行けなかった</div>';
     }
   } finally {
+    paintKeyBanner();
     btn.classList.remove('spin');
   }
 }
@@ -403,9 +448,23 @@ $('#s-save').addEventListener('click', async () => {
   const repo  = $('#s-repo').value.trim();
   const token = $('#s-token').value.trim();
   const msg = $('#s-msg');
-  if (owner) localStorage.setItem(LS.owner, owner);
-  if (repo)  localStorage.setItem(LS.repo, repo);
-  if (token) localStorage.setItem(LS.token, token);
+  let ok = true;
+  if (owner) ok = put(LS.owner, owner) && ok;
+  if (repo)  ok = put(LS.repo, repo) && ok;
+  if (token) ok = put(LS.token, token) && ok;
+  paintKeyBanner();
+  paintKeyState();
+  if (!ok) {   // 黙って消えるのが一番たちが悪い。書けないなら書けないと言う
+    msg.className = 'note ng';
+    msg.textContent = 'この端末に鍵を保存できなかった。'
+      + 'プライベートブラウズを切るか、設定でこのサイトのデータを許可する。';
+    return;
+  }
+  if (!cfg().token) {
+    msg.className = 'note ng';
+    msg.textContent = '鍵の欄が空。github_pat_ で始まる文字列を貼る。';
+    return;
+  }
   msg.className = 'note'; msg.textContent = 'つないでいる…';
   try {
     await pull('state/state.json');
@@ -415,13 +474,17 @@ $('#s-save').addEventListener('click', async () => {
     setTimeout(() => show('factory'), 500);
   } catch (e) {
     msg.className = 'note ng'; msg.textContent = `だめだった：${e.message}`;
+  } finally {
+    paintKeyBanner();
+    paintKeyState();
   }
 });
 
 $('#s-clear').addEventListener('click', () => {
   localStorage.removeItem(LS.token);
   $('#s-token').value = '';
-  $('#nokey').hidden = false;   // 消したのに帯が出ないと、消えたのか分からない
+  paintKeyBanner();   // 消したのに帯が出ないと、消えたのか分からない
+  paintKeyState();
   $('#s-msg').className = 'note';
   $('#s-msg').textContent = '鍵を消した。この端末からは金庫を読めなくなった。';
 });
@@ -429,6 +492,8 @@ $('#s-clear').addEventListener('click', () => {
 /* ================= 起動 ================= */
 
 restoreDraft();
+paintKeyBanner();
+paintKeyState();
 renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
 refresh(false);
