@@ -1,5 +1,5 @@
 /* 圏外でも画面の枠だけは出るようにする。会社のデータ（api.github.com）は絶対にキャッシュしない。 */
-const V = 'aomushi-v9';   // 枠のファイルを触ったら必ず上げる（v9＝決裁タブ・校了ボタン）
+const V = 'aomushi-v10';  // 枠のファイルを触ったら必ず上げる（v10＝知らせ）
 const SHELL = [
   './', './index.html', './style.css', './app.js', './config.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png',
@@ -16,6 +16,33 @@ self.addEventListener('activate', (e) => {
       .then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+/* 第4期：知らせ。係の返事が金庫に入ったとき、Macから突く。
+   中身（会社の数字）は載せない。載せるのは「誰から・何について」だけ。 */
+self.addEventListener('push', (e) => {
+  let d = { title: 'あおむし製作所', body: '会社に動きがあった。' };
+  try { d = Object.assign(d, e.data ? e.data.json() : {}); } catch (_) {
+    if (e.data) d.body = e.data.text();
+  }
+  e.waitUntil(self.registration.showNotification(d.title, {
+    body: d.body,
+    tag: d.tag || 'aomushi',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    data: { url: d.url || './' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './',
+                      self.location.href).href;
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then((ws) => {
+      for (const w of ws) if ('focus' in w) return w.focus();
+      return clients.openWindow(url);
+    }));
 });
 
 self.addEventListener('fetch', (e) => {

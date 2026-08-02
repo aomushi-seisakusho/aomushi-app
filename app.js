@@ -12,6 +12,7 @@ const LS = {
   pend:  'aomushi.sent.pending',   // 金庫に置いたが、まだ state.json に載っていない手紙
   draft: 'aomushi.mail.draft',     // 書きかけ。アプリが裏に回っても消えないように
   kes:   'aomushi.kessai.pending', // 決裁票は置いたが、まだ原稿に印が付いていない分
+  push:  'aomushi.push.id',        // 知らせの宛先ID（金庫の push/<id>.json と対）
 };
 
 const DEF = window.AOMUSHI_CONFIG || {};
@@ -194,6 +195,7 @@ function openSetup(focus) {
   $('#s-msg').textContent = c.token ? '貼り直すときだけ鍵の欄に入力する。' : '';
   $('#s-msg').className = 'note';
   paintKeyState();
+  paintShirase();
   show('setup');
   // すでに設定画面に居るときに⚙を押しても見た目が変わらず「効いていない」と読める。
   // 押した手応えとして、鍵の欄に必ずカーソルを入れる
@@ -712,6 +714,96 @@ async function selftest() {
   }
 }
 $('#s-test').addEventListener('click', selftest);
+
+/* ================= 知らせ（第4期） =================
+   係の返事が金庫に入ったとき、Macから端末を突く。通知に会社の数字は載せない。
+   iPhoneは「ホーム画面に追加したアプリから開いたとき」しか受け取れない（Safariのタブでは不可）。 */
+
+const b64urlToU8 = (s) => {
+  const p = (s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(p), (c) => c.charCodeAt(0));
+};
+const pushOK = () => ('serviceWorker' in navigator) && ('PushManager' in window)
+                  && ('Notification' in window);
+
+/* 上書きできる置き方。既にあるファイルは sha を付けないと置き換えられない */
+async function putFile(path, text, message) {
+  const c = cfg();
+  const cur = await api('GET', `/repos/${c.owner}/${c.repo}/contents/${path}`
+                             + `?ref=${encodeURIComponent(c.branch)}`);
+  const body = { message, content: b64utf8(text), branch: c.branch };
+  if (cur.status === 200 && cur.data && cur.data.sha) body.sha = cur.data.sha;
+  const r = await api('PUT', `/repos/${c.owner}/${c.repo}/contents/${path}`, body);
+  if (r.status !== 200 && r.status !== 201) throw new Error(`${r.status} ${r.msg}`);
+  return r.data;
+}
+
+function paintShirase() {
+  const el = $('#s-shirase');
+  if (!el) return;
+  const on = !!localStorage.getItem(LS.push);
+  const perm = ('Notification' in window) ? Notification.permission : 'なし';
+  const home = window.matchMedia('(display-mode: standalone)').matches
+            || window.navigator.standalone === true;
+  el.innerHTML = [
+    `知らせ：<b>${on ? '入っている' : '入っていない'}</b>（この端末の許可：${esc(perm)}）`,
+    pushOK() ? '' : 'この開き方では受け取れない。ホーム画面に追加したアプリから開く。',
+    home ? '' : '今はブラウザのタブとして開いている。iPhoneはこの状態だと知らせを受け取れない。',
+  ].filter(Boolean).join('<br>');
+  el.className = 'note keystate ' + (on ? 'ok' : 'ng');
+  $('#s-push').textContent = on ? '知らせを止める' : 'この端末に知らせを入れる';
+}
+
+async function shirase() {
+  const msg = $('#s-push-msg'), btn = $('#s-push');
+  const id = localStorage.getItem(LS.push);
+  msg.className = 'note';
+  btn.disabled = true;
+  try {
+    if (!hasKey()) throw new NoKey('鍵がまだ入っていない');
+    if (!pushOK()) throw new Error('この開き方では知らせを受け取れない。ホーム画面に追加したアプリから開く。');
+    const reg = await navigator.serviceWorker.ready;
+
+    if (id) {                                   // 止める
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      const c = cfg();
+      const cur = await api('GET', `/repos/${c.owner}/${c.repo}/contents/push/${id}.json`
+                                 + `?ref=${encodeURIComponent(c.branch)}`);
+      if (cur.status === 200 && cur.data && cur.data.sha)
+        await api('DELETE', `/repos/${c.owner}/${c.repo}/contents/push/${id}.json`,
+                  { message: `知らせの宛先を外す：${id}`, branch: c.branch, sha: cur.data.sha });
+      localStorage.removeItem(LS.push);
+      msg.className = 'note ok';
+      msg.textContent = '知らせを止めた。金庫からもこの端末の宛先を消した。';
+      return;
+    }
+
+    const perm = await Notification.requestPermission();   // 入れる
+    if (perm !== 'granted')
+      throw new Error(`許可されなかった（${perm}）。iPhoneの設定→通知 から戻せる。`);
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: b64urlToU8(DEF.vapid || ''),
+    });
+    const nid = 'd' + Math.random().toString(36).slice(2, 10);
+    await putFile(`push/${nid}.json`,
+      JSON.stringify({ id: nid, sub: sub.toJSON(), ts: isoLocal(new Date()) }, null, 2) + '\n',
+      `知らせの宛先：${nid}`);
+    put(LS.push, nid);
+    msg.className = 'note ok';
+    msg.textContent = '知らせを入れた。係が返事を書いたら、この端末が鳴る。';
+  } catch (e) {
+    msg.className = 'note ng';
+    msg.textContent = e instanceof NoKey
+      ? '先に鍵を入れる。知らせの宛先も金庫に置くので、鍵が要る。'
+      : `だめだった：${e.message}`;
+  } finally {
+    btn.disabled = false;
+    paintShirase();
+  }
+}
+$('#s-push').addEventListener('click', shirase);
 
 $('#s-clear').addEventListener('click', () => {
   localStorage.removeItem(LS.token);
