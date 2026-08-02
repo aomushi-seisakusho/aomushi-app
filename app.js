@@ -593,6 +593,21 @@ $('#s-clear').addEventListener('click', () => {
   $('#s-msg').textContent = '鍵を消した。この端末からは金庫を読めなくなった。';
 });
 
+/* QRから鍵を入れる。#k=github_pat_… で開かれたら、その場で保存してURLから消す。
+   スマホで90文字を手で貼る工程が一番事故る（別の鍵が入っていても気づけない）。
+   URLの # から後ろはGitHubのサーバーには一切送られない。履歴に残さないよう即座に消す。 */
+function installKeyFromURL() {
+  const m = (location.hash || '').match(/[#&]k=([^&]+)/);
+  if (!m) return '';
+  let t = '';
+  try { t = decodeURIComponent(m[1]).trim(); } catch (_) { t = m[1].trim(); }
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!/^github_pat_[A-Za-z0-9_]{40,}$/.test(t)) return 'ng:QRの中身が鍵の形をしていない';
+  if (!put(LS.token, t)) return 'ng:この端末に鍵を保存できなかった（プライベートブラウズを切る）';
+  return 'ok';
+}
+const INSTALLED = installKeyFromURL();
+
 /* ================= 起動 ================= */
 
 restoreDraft();
@@ -601,6 +616,15 @@ paintKeyState();
 renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
 refresh(false);
+
+// QR経由で鍵が入ったときは、黙って通したことにしない。⚙を開いてその場で力試しまで走らせる
+if (INSTALLED) {
+  openSetup(false);
+  const ok = INSTALLED === 'ok';
+  $('#s-msg').className = 'note ' + (ok ? 'ok' : 'ng');
+  $('#s-msg').textContent = ok ? 'QRから鍵を入れた。そのまま力試しをする。' : INSTALLED.slice(3);
+  if (ok) selftest();
+}
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh(true);
 });
