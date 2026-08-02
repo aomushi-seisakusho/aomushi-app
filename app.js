@@ -1,6 +1,7 @@
 /* あおむし製作所 PWA
    非公開リポジトリ（金庫）から state.json / factory.svg / ledger.json を読んで表示する。
-   第1期は読み取りだけ。書き込みは第2期。投稿は絶対にしない（憲法4条）。 */
+   第2期：係あての手紙を金庫の inbox/ に置けるようになった。
+   置くのは金庫まで。Threadsへの送信も返信も、ここからは絶対にしない（憲法4条）。 */
 'use strict';
 
 const LS = {
@@ -8,6 +9,8 @@ const LS = {
   owner: 'aomushi.owner',
   repo:  'aomushi.repo',
   state: 'aomushi.cache.state',
+  pend:  'aomushi.sent.pending',   // 金庫に置いたが、まだ state.json に載っていない手紙
+  draft: 'aomushi.mail.draft',     // 書きかけ。アプリが裏に回っても消えないように
 };
 
 const DEF = window.AOMUSHI_CONFIG || {};
@@ -55,6 +58,49 @@ async function pull(path) {
   return res.text();
 }
 
+/* 金庫に1ファイル置く。置けるのは inbox/ の手紙だけに絞ってある。 */
+async function push(path, text, message) {
+  const c = cfg();
+  if (!c.token || !c.owner || !c.repo) throw new NoKey('鍵がまだ入っていない');
+  const url = `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${c.token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message, content: b64utf8(text), branch: c.branch }),
+  });
+  if (res.status === 401) throw new Error('鍵が違うか、期限が切れている');
+  if (res.status === 403 || res.status === 404)
+    throw new Error('鍵に金庫へ書き込む権限が無い（鍵の Contents を Read and write にする）');
+  if (res.status === 409 || res.status === 422)
+    throw new Error('金庫が動いている最中だった。少し置いてもう一度');
+  if (!res.ok) throw new Error(`置けなかった（${res.status}）`);
+  return res.json();
+}
+
+// btoa は日本語をそのまま渡すと落ちる。UTF-8のバイト列にしてから渡す
+function b64utf8(s) {
+  const by = new TextEncoder().encode(s);
+  let bin = '';
+  for (let i = 0; i < by.length; i += 0x8000)
+    bin += String.fromCharCode.apply(null, by.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+const stamp = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+                   + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+function isoLocal(d) {
+  const off = -d.getTimezoneOffset(), a = Math.abs(off);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+       + `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+       + `${off >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+}
+
 /* ================= 画面の切り替え ================= */
 
 const VIEWS = ['factory', 'mail', 'ledger', 'setup'];
@@ -89,6 +135,7 @@ $('#gokey').addEventListener('click', () => openSetup(true));
 /* ================= 工場 ================= */
 
 function renderState(st) {
+  ST = st;
   const c = st.counts || {};
 
   const chip = (label, val, warn) =>
@@ -146,19 +193,100 @@ function renderMail(st) {
       : `編集長 → ${YAKU[m.to] || m.to || ''}`;
     const t = m.ts ? new Date(m.ts).toLocaleString('ja-JP',
       { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-    return `<li>
+    return `<li class="${m.pending ? 'pending' : ''}">
       <div class="mh"><span class="who">${esc(who)}</span>
         ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
         <span class="mt">${esc(t)}</span></div>
-      <div class="mb">${esc(m.body || '')}</div></li>`;
+      <div class="mb">${esc(m.body || '')}</div>
+      ${m.pending ? '<div class="pnote">金庫に置いた。次にMacが動いたときに係が読む。</div>' : ''}
+      </li>`;
   };
   const mail = st.mail || [], sent = st.sent || [];
+  // 金庫には届いたが state.json はまだ刷り直されていない分を、上に混ぜて出す
+  const known = new Set(sent.map((m) => m.id));
+  const pend = loadPending().filter((m) => !known.has(m.id));
+  savePending(pend);
+  const out = pend.map((m) => ({ ...m, pending: true })).concat(sent);
+
   $('#mail').innerHTML = mail.length ? mail.map((m) => line(m, 'in')).join('')
     : '<li class="empty">返事はまだ無い。（第3期で係が返事を書くようになる）</li>';
-  $('#sent').innerHTML = sent.length ? sent.map((m) => line(m, 'out')).join('')
-    : '<li class="empty">まだ何も送っていない。（第2期で送れるようになる）</li>';
+  $('#sent').innerHTML = out.length ? out.map((m) => line(m, 'out')).join('')
+    : '<li class="empty">まだ何も送っていない。</li>';
   $('#maildot').hidden = mail.length === 0;
 }
+
+/* ================= 手紙を出す（第2期） ================= */
+
+const jparse = (s, fb) => { try { return JSON.parse(s) ?? fb; } catch (_) { return fb; } };
+const loadPending = () => {
+  const v = jparse(localStorage.getItem(LS.pend), []);
+  return Array.isArray(v) ? v : [];
+};
+const savePending = (a) => {
+  try { localStorage.setItem(LS.pend, JSON.stringify(a.slice(0, 30))); } catch (_) { /* 無視 */ }
+};
+
+let ST = null;   // 最後に読めた会社の姿。送った直後に画面だけ描き直すのに使う
+
+const draftFields = () => ({
+  to: $('#m-to').value, subject: $('#m-subject').value, body: $('#m-body').value,
+});
+function saveDraft() {
+  try { localStorage.setItem(LS.draft, JSON.stringify(draftFields())); } catch (_) { /* 無視 */ }
+}
+function restoreDraft() {
+  const d = jparse(localStorage.getItem(LS.draft), null);
+  if (!d) return;
+  if (d.to) $('#m-to').value = d.to;
+  $('#m-subject').value = d.subject || '';
+  $('#m-body').value = d.body || '';
+}
+function clearDraft() {
+  localStorage.removeItem(LS.draft);
+  $('#m-subject').value = '';
+  $('#m-body').value = '';
+}
+['#m-to', '#m-subject', '#m-body'].forEach((s) =>
+  $(s).addEventListener('input', saveDraft));
+
+$('#m-send').addEventListener('click', async () => {
+  const btn = $('#m-send'), msg = $('#m-msg');
+  const to = $('#m-to').value;
+  const subject = $('#m-subject').value.trim();
+  const body = $('#m-body').value.trim();
+  msg.className = 'note';
+  if (!body) { msg.className = 'note ng'; msg.textContent = '本文が空。'; return; }
+
+  const d = new Date();
+  const letter = {
+    id: `${stamp(d)}-${to}`, from: 'boss', to, subject, body, ts: isoLocal(d),
+  };
+  btn.disabled = true;
+  msg.textContent = '金庫に置いている…';
+  try {
+    await push(`inbox/${letter.id}.json`,
+               JSON.stringify(letter, null, 2) + '\n',
+               `社内便：編集長 → ${YAKU[to] || to}`);
+    savePending([letter].concat(loadPending()));
+    clearDraft();
+    msg.className = 'note ok';
+    msg.textContent = `${YAKU[to] || to}あてに置いた。Threadsには何も出ていない。`;
+    renderMail(ST || {});
+  } catch (e) {
+    msg.className = 'note ng';
+    msg.textContent = e instanceof NoKey
+      ? '鍵がまだ入っていない。右上の⚙から入れる。'
+      : `置けなかった：${e.message}（本文は消していない）`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#m-discard').addEventListener('click', () => {
+  clearDraft();
+  $('#m-msg').className = 'note';
+  $('#m-msg').textContent = '書きかけを消した。';
+});
 
 /* ================= 台帳 ================= */
 
@@ -293,12 +421,15 @@ $('#s-save').addEventListener('click', async () => {
 $('#s-clear').addEventListener('click', () => {
   localStorage.removeItem(LS.token);
   $('#s-token').value = '';
+  $('#nokey').hidden = false;   // 消したのに帯が出ないと、消えたのか分からない
   $('#s-msg').className = 'note';
   $('#s-msg').textContent = '鍵を消した。この端末からは金庫を読めなくなった。';
 });
 
 /* ================= 起動 ================= */
 
+restoreDraft();
+renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
 refresh(false);
 document.addEventListener('visibilitychange', () => {

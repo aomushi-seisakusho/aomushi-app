@@ -7,6 +7,10 @@
   --tabh:58px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+/* hidden属性はブラウザ既定の [hidden]{display:none} で効くが、それは既定値なので
+   こちらが .nokey{display:flex} のように display を書いた瞬間に負けて無効になる。
+   実際に「鍵は入っているのに黄色い帯が消えない」事故を起こした。ここで最優先に固定する。 */
+[hidden]{display:none!important}
 html{background:var(--bg)}
 body{
   background:var(--bg);color:var(--ink);
@@ -112,6 +116,7 @@ main{padding:10px 10px 0}
 .mail .who{border:1px solid var(--line);padding:0 6px;font-size:10.5px}
 .mail .mt{margin-left:auto;font-size:10.5px;color:#6d7390}
 .mail .mb{font-size:12px;color:var(--ink);margin-top:5px;white-space:pre-wrap;word-break:break-word}
+.mail .pnote{font-size:10.5px;color:var(--amber);margin-top:5px}
 
 /* ---- 台帳 ---- */
 .ltools{display:grid;gap:7px}
@@ -137,17 +142,27 @@ main{padding:10px 10px 0}
 .more{width:100%;margin-top:10px;background:var(--panel);border:1px solid var(--line);
   color:var(--dim);padding:10px;font-size:12px}
 
-/* ---- 設定 ---- */
+/* ---- 入力欄（設定・社内便で共用） ---- */
 .fld{display:block;margin-bottom:10px}
 .fld span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px}
-.fld input{width:100%;background:var(--bg);border:1px solid var(--line);padding:11px 10px;
-  font-size:16px;-webkit-appearance:none;border-radius:0}
+/* font-size は16px未満にしない。iOSが勝手に拡大して画面がずれる */
+.fld input,.fld textarea,.fld select{width:100%;background:var(--bg);border:1px solid var(--line);
+  padding:11px 10px;font-size:16px;-webkit-appearance:none;border-radius:0;
+  font-family:inherit;color:inherit;line-height:1.6}
+.fld textarea{resize:vertical;min-height:104px}
+.fld select{background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),
+  linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px}
 .btnrow{display:flex;gap:8px}
-.btn{flex:1;background:var(--green);color:#101018;border:0;padding:11px;font-size:13px;letter-spacing:.05em}
+.btn{flex:1;background:var(--green);color:#101018;border:0;padding:11px;font-size:13px;
+  letter-spacing:.05em;min-height:44px}
 .btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
 .btn:active{opacity:.75}
-#s-msg.ok{color:var(--green)}
-#s-msg.ng{color:var(--red)}
+.btn[disabled]{opacity:.45}
+#s-msg.ok,#m-msg.ok{color:var(--green)}
+#s-msg.ng,#m-msg.ng{color:var(--red)}
+.mail li.pending{border-left:2px solid var(--amber)}
 
 /* ---- 下のタブ ---- */
 .tabs{

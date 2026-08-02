@@ -67,6 +67,30 @@
 
   <!-- ============ 社内便 ============ -->
   <section id="view-mail" class="view" hidden>
+
+    <section class="panel">
+      <h2>係に手紙を出す</h2>
+      <label class="fld"><span>宛先</span>
+        <select id="m-to">
+          <option value="kiroku">記録係（数字・台帳）</option>
+          <option value="saikutsu">採掘係（出来事を掘る）</option>
+          <option value="shippitsu">執筆係（下書きを書く）</option>
+          <option value="kenmon">検問係（下書きを落とす）</option>
+          <option value="teisatsu">偵察係（題材の熱）</option>
+        </select></label>
+      <label class="fld"><span>件名（無くてもいい）</span>
+        <input id="m-subject" type="text" autocomplete="off" placeholder="例：運動会の話の隣を掘って"></label>
+      <label class="fld"><span>本文</span>
+        <textarea id="m-body" rows="5" placeholder="思いついたまま書いていい。あとで係が読む。"></textarea></label>
+      <div class="btnrow">
+        <button id="m-send" class="btn">金庫に入れる</button>
+        <button id="m-discard" class="btn ghost">消す</button>
+      </div>
+      <p class="note" id="m-msg"></p>
+      <p class="note">これは係あての手紙。<b>Threadsには何も出ない</b>（憲法4条）。
+        非公開の金庫に置かれ、次にMacが動いたときに係が読む。</p>
+    </section>
+
     <section class="panel">
       <h2>係からの返事</h2>
       <ul class="mail" id="mail"></ul>
@@ -75,7 +99,6 @@
       <h2>編集長が送った分</h2>
       <ul class="mail" id="sent"></ul>
     </section>
-    <p class="note">第1期は読み取りだけ。送信ボタンは第2期でここに付く。</p>
   </section>
 
   <!-- ============ 台帳 ============ -->
