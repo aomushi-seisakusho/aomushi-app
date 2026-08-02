@@ -25,7 +25,7 @@ const esc = (s) => String(s == null ? '' : s)
   .replace(/"/g, '&quot;');
 const nf = (n) => Number(n || 0).toLocaleString('ja-JP');
 
-// 型の色。出していいのは手分類だけ（自動判定は上位50本の56%を取り違えた）
+// 型の色。出していいのは手分類だけ（自動判定は信用しない）
 const TYPE_COLOR = { A: '#F06292', D: '#4FC3F7', 'D-': '#3a7ea0', B: '#D4C34A', C: '#8a8fa8' };
 const YAKU = { boss:'編集長', kiroku:'記録係', saikutsu:'採掘係',
                shippitsu:'執筆係', kenmon:'検問係', teisatsu:'偵察係' };
@@ -194,7 +194,7 @@ function paintLedger(reset) {
       </div></li>`).join(''));
   $('#more').hidden = shown >= rows.length;
   $('#lstat').textContent =
-    `${nf(rows.length)}本中 ${nf(shown)}本を表示　／　型は人が読んで決めた${nf(HANDED)}本だけ表示（自動判定は出さない）`;
+    `${nf(rows.length)}本中 ${nf(shown)}本を表示　／　型は人が読んで決めた${nf(HANDED)}本だけ表示`;
 }
 
 async function loadLedger() {
