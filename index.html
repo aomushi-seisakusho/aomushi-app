@@ -117,6 +117,18 @@
     <p class="note">views未取得の行は順位づけに使わない。判定は views と いいね率の2軸だけ。<br>型は人が読んで決めたものだけ出す。それ以外は「未分類」。機械の自動判定は当てにならないので画面に出さない。</p>
   </section>
 
+  <!-- ============ 決裁 ============ -->
+  <section id="view-kessai" class="view" hidden>
+    <section class="panel">
+      <h2>決裁（校了・差し戻し）</h2>
+      <p class="note" style="margin:0 0 10px">
+        校了にしても、Threadsには何も出ない（憲法4条）。出すのは編集長が自分で貼ったときだけ。
+        校了＝「これは貼っていい」という記録。本文はここからコピーできる。
+      </p>
+      <ul class="drafts" id="drafts"></ul>
+    </section>
+  </section>
+
   <!-- ============ 設定 ============ -->
   <section id="view-setup" class="view" hidden>
     <section class="panel">
@@ -155,6 +167,7 @@
 <nav class="tabs">
   <button data-tab="factory" class="on"><b>工</b><span>工場</span></button>
   <button data-tab="mail"><b>便</b><span>社内便</span><i class="dot" id="maildot" hidden></i></button>
+  <button data-tab="kessai"><b>決</b><span>決裁</span><i class="dot" id="kesdot" hidden></i></button>
   <button data-tab="ledger"><b>帳</b><span>台帳</span></button>
 </nav>
 

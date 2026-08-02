@@ -191,6 +191,26 @@ main{padding:10px 10px 0}
 .testout.ng{color:var(--amber);border-color:#5c4f2a}
 .mail li.pending{border-left:2px solid var(--amber)}
 
+/* ---- 決裁 ---- */
+.drafts{list-style:none;display:grid;gap:10px}
+.drafts li{border:1px solid var(--line);background:#191720;padding:9px 10px;min-width:0}
+.drafts li.pending{border-left:2px solid var(--amber)}
+.drafts .dh{display:flex;align-items:center;gap:8px;font-size:12px}
+.drafts .dh b{color:var(--sub);word-break:break-all}
+.drafts .badge{margin-left:auto;flex:none;border:1px solid var(--line);color:var(--dim);
+  font-size:10.5px;padding:1px 7px;border-radius:9px}
+.drafts .badge.ok{color:var(--green);border-color:#2f5c39}
+.drafts .badge.ng{color:var(--amber);border-color:#5c4f2a}
+.drafts .dt{font-size:12px;color:var(--ink);line-height:1.85;margin-top:7px;
+  white-space:pre-wrap;word-break:break-word;max-height:230px;overflow-y:auto;
+  border-left:2px solid var(--line);padding-left:9px}
+.drafts .drea{margin-top:7px;font-size:11px;color:var(--amber);line-height:1.6;
+  background:#2a2416;border:1px solid #5c4f2a;padding:6px 8px}
+.drafts .btnrow{margin-top:9px}
+.drafts .btn{flex:1;font-size:12px;padding:0 4px}
+.drafts .pnote{margin-top:8px}
+.drafts .kes-msg:empty{display:none}
+
 /* ---- 下のタブ ---- */
 .tabs{
   position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;

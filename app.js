@@ -11,6 +11,7 @@ const LS = {
   state: 'aomushi.cache.state',
   pend:  'aomushi.sent.pending',   // 金庫に置いたが、まだ state.json に載っていない手紙
   draft: 'aomushi.mail.draft',     // 書きかけ。アプリが裏に回っても消えないように
+  kes:   'aomushi.kessai.pending', // 決裁票は置いたが、まだ原稿に印が付いていない分
 };
 
 const DEF = window.AOMUSHI_CONFIG || {};
@@ -152,7 +153,7 @@ function isoLocal(d) {
 
 /* ================= 画面の切り替え ================= */
 
-const VIEWS = ['factory', 'mail', 'ledger', 'setup'];
+const VIEWS = ['factory', 'mail', 'kessai', 'ledger', 'setup'];
 let ledgerLoaded = false;
 
 function show(name) {
@@ -237,6 +238,7 @@ function renderState(st) {
     : '<li class="empty">まだ動きが無い。</li>';
 
   renderMail(st);
+  renderKessai(st);
 
   const g = st.generated_at ? new Date(st.generated_at) : null;
   $('#gen').textContent = g
@@ -318,6 +320,96 @@ function renderMail(st) {
     : '<li class="empty">まだ何も送っていない。</li>';
   $('#maildot').hidden = mail.length === 0;
 }
+
+/* ================= 決裁（第3期・校了ボタン） =================
+   校了しても Threads には何も出ない。出すのは編集長が自分で貼ったときだけ（憲法4条）。
+   ここが書くのは金庫の inbox/ に置く決裁票1枚。原稿に印をつけるのはMac側の配達係。 */
+
+const loadKes = () => {
+  const v = jparse(localStorage.getItem(LS.kes), {});
+  return (v && typeof v === 'object') ? v : {};
+};
+const saveKes = (o) => put(LS.kes, JSON.stringify(o));
+
+const ST_CLS = { '校了': 'ok', '再校': 'ng', '初校': '' };
+
+function renderKessai(st) {
+  const ds = st.drafts || [];
+  const pend = loadKes();
+  // Mac側が印を付け終わった原稿は、待ち札を消す
+  ds.forEach((d) => { if (pend[d.n] && pend[d.n].want === d.st) delete pend[d.n]; });
+  saveKes(pend);
+
+  $('#drafts').innerHTML = ds.length ? ds.map((d) => {
+    const p = pend[d.n];
+    const st_ = p ? p.want : d.st;
+    return `<li class="${p ? 'pending' : ''}">
+      <div class="dh"><b>${esc(d.n)}</b>
+        <span class="badge ${ST_CLS[st_] || ''}">${esc(st_)}</span></div>
+      <div class="dt">${esc(d.body || d.h || '')}</div>
+      ${d.reason ? `<div class="drea">検問：${esc(d.reason)}</div>` : ''}
+      ${p ? `<div class="pnote">${esc(p.want)}にした。次にMacが動いたとき原稿に印が付く。</div>` : `
+      <div class="btnrow">
+        <button class="btn kes-ok" data-n="${esc(d.n)}">校了</button>
+        <button class="btn ghost kes-ng" data-n="${esc(d.n)}">差し戻し</button>
+        <button class="btn ghost kes-cp" data-n="${esc(d.n)}">本文をコピー</button>
+      </div>`}
+      <p class="note kes-msg" id="km-${esc(d.n)}"></p>
+    </li>`;
+  }).join('') : '<li class="empty">下書きが無い。執筆係が書けば、ここに出る。</li>';
+
+  const waiting = ds.filter((d) => d.st === '初校' || d.st === '再校').length;
+  $('#kesdot').hidden = waiting === 0;
+}
+
+async function decide(n, want, note) {
+  const msg = $(`#km-${CSS.escape(n)}`);
+  const d = new Date();
+  const slip = {
+    id: `${stamp(d)}-kessai-${n}`, kind: 'kessai',
+    draft: n, action: want === '校了' ? 'pass' : 'reject',
+    note: note || '', from: 'boss', ts: isoLocal(d),
+  };
+  if (msg) { msg.className = 'note'; msg.textContent = '金庫に置いている…'; }
+  try {
+    await push(`inbox/${slip.id}.json`, JSON.stringify(slip, null, 2) + '\n',
+               `決裁：${n} を${want}`);
+    const pend = loadKes();
+    pend[n] = { want, ts: slip.ts };
+    saveKes(pend);
+    renderKessai(ST || {});
+  } catch (e) {
+    if (msg) {
+      msg.className = 'note ng';
+      msg.textContent = e instanceof NoKey
+        ? '鍵がまだ入っていない。右上の⚙から入れる。'
+        : `置けなかった：${e.message}`;
+    }
+  }
+}
+
+$('#drafts').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  const n = b.dataset.n;
+  if (b.classList.contains('kes-cp')) {
+    const d = (ST && ST.drafts || []).find((x) => x.n === n);
+    const msg = $(`#km-${CSS.escape(n)}`);
+    try {
+      await navigator.clipboard.writeText((d && d.body) || '');
+      msg.className = 'note ok'; msg.textContent = '本文をコピーした。Threadsに貼るのは編集長の手で。';
+    } catch (_) {
+      msg.className = 'note ng'; msg.textContent = 'この端末ではコピーできなかった。長押しで選んでくれ。';
+    }
+    return;
+  }
+  if (b.classList.contains('kes-ok')) return decide(n, '校了', '');
+  if (b.classList.contains('kes-ng')) {
+    const note = prompt('差し戻す理由（執筆係に渡る）', '');
+    if (note === null) return;
+    return decide(n, '再校', note);
+  }
+});
 
 /* ================= 手紙を出す（第2期） ================= */
 
