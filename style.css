@@ -167,6 +167,12 @@ main{padding:10px 10px 0}
   font-size:11.5px;line-height:1.75;word-break:break-all}
 .keystate.ok{color:var(--green);border-color:#2f5c39}
 .keystate.ng{color:var(--amber);border-color:#5c4f2a}
+/* 力試しの結果。GitHubが返した数字をそのまま出すので、折り返しても読める形にする */
+.testout{white-space:pre-wrap;word-break:break-word;margin:8px 0 0;padding:8px 10px;
+  border:1px solid var(--line);background:var(--bg);border-radius:8px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.8}
+.testout.ok{color:var(--green);border-color:#2f5c39}
+.testout.ng{color:var(--amber);border-color:#5c4f2a}
 .mail li.pending{border-left:2px solid var(--amber)}
 
 /* ---- 下のタブ ---- */

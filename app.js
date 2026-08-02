@@ -91,12 +91,44 @@ async function push(path, text, message) {
     body: JSON.stringify({ message, content: b64utf8(text), branch: c.branch }),
   });
   if (res.status === 401) throw new Error('鍵が違うか、期限が切れている');
-  if (res.status === 403 || res.status === 404)
-    throw new Error('鍵に金庫へ書き込む権限が無い（鍵の Contents を Read and write にする）');
+  // 403と404を同じ文言に潰していたせいで、別の病気を同じ薬で治そうとして1回外した。
+  // 403＝金庫は見えるが書けない／404＝そもそもこの鍵から金庫が見えていない
+  if (res.status === 403)
+    throw new Error('鍵にこの金庫へ書き込む権限が無い（Contents を Read and write に）');
+  if (res.status === 404)
+    throw new Error('鍵からこの金庫が見えていない（鍵の対象リポジトリに入っていない／名前違い）');
   if (res.status === 409 || res.status === 422)
     throw new Error('金庫が動いている最中だった。少し置いてもう一度');
   if (!res.ok) throw new Error(`置けなかった（${res.status}）`);
   return res.json();
+}
+
+/* 生のAPI。力試し専用。status と GitHub の言い分を、翻訳せずそのまま返す。
+   アプリの日本語に丸めた瞬間に、原因の切り分けができなくなる。 */
+async function api(method, path, body) {
+  const c = cfg();
+  const opt = {
+    method,
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${c.token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  };
+  if (body) {
+    opt.headers['Content-Type'] = 'application/json';
+    opt.body = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch('https://api.github.com' + path, opt);
+  } catch (_) {
+    return { status: 0, data: null, msg: '通信が届かない（圏外か、遮断されている）' };
+  }
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  return { status: res.status, data, msg: (data && data.message) || '' };
 }
 
 // btoa は日本語をそのまま渡すと落ちる。UTF-8のバイト列にしてから渡す
@@ -479,6 +511,78 @@ $('#s-save').addEventListener('click', async () => {
     paintKeyState();
   }
 });
+
+/* 鍵の力試し。①身元 ②金庫が見えるか ③読み ④書き を別々に叩いて、
+   どこで落ちたかを数字のまま出す。「権限が無い」の一言では、
+   Contents が Read-only なのか、そもそも金庫が鍵に入っていないのか区別できない。 */
+const TESTPATH = 'inbox/_kagi_test.json';
+
+async function selftest() {
+  const c = cfg();
+  const out = $('#s-testout'), btn = $('#s-test');
+  const L = [];
+  const say = (s) => { L.push(s); out.textContent = L.join('\n'); };
+  const fin = (cls, ...tail) => { tail.forEach(say); out.className = 'note testout ' + cls; };
+
+  out.hidden = false;
+  out.className = 'note testout';
+  if (!c.token) {
+    out.className = 'note testout ng';
+    out.textContent = '鍵が入っていない。先に鍵を貼る。';
+    return;
+  }
+  btn.disabled = true;
+  out.textContent = '試している…';
+  try {
+    say(`鍵 ${c.token.slice(0, 11)}…／全${c.token.length}文字`);
+    say(`金庫 ${c.owner}/${c.repo}（${c.branch}）`);
+    say('');
+
+    const me = await api('GET', '/user');
+    if (me.status === 401) {
+      return fin('ng', `① 身元 …… ✕ 401 ${me.msg}`, '',
+                 '→ 鍵そのものが違うか、期限が切れている。権限の話ではない。');
+    }
+    say(`① 身元 …… ${me.status === 200 ? '○ ' + ((me.data && me.data.login) || '') : '△ ' + me.status}`);
+
+    const repo = await api('GET', `/repos/${c.owner}/${c.repo}`);
+    if (repo.status !== 200) {
+      return fin('ng', `② 金庫が見えるか …… ✕ ${repo.status} ${repo.msg}`, '',
+                 `→ この鍵からは金庫そのものが見えていない。鍵の Repository access に `
+                 + `${c.repo} が入っていないか、名前が違う。Contents の設定より手前の問題。`);
+    }
+    say('② 金庫が見えるか …… ○ 200');
+
+    const rd = await api('GET', `/repos/${c.owner}/${c.repo}/contents/state/state.json`
+                              + `?ref=${encodeURIComponent(c.branch)}`);
+    say(`③ 読み …… ${rd.status === 200 ? '○ 200' : `✕ ${rd.status} ${rd.msg}`}`);
+
+    const wr = await api('PUT', `/repos/${c.owner}/${c.repo}/contents/${TESTPATH}`, {
+      message: '鍵の力試し（すぐ消す）',
+      branch: c.branch,
+      content: b64utf8('{"kagi":"test"}\n'),
+    });
+    if (wr.status === 200 || wr.status === 201) {
+      say(`④ 書き …… ○ ${wr.status} 置けた`);
+      const sha = wr.data && wr.data.content && wr.data.content.sha;
+      const del = sha
+        ? await api('DELETE', `/repos/${c.owner}/${c.repo}/contents/${TESTPATH}`,
+                    { message: '力試しの後始末', branch: c.branch, sha })
+        : { status: 0, msg: 'shaが返ってこなかった' };
+      say(`⑤ 後始末 …… ${del.status === 200 ? '○ 消した'
+                        : `△ ${del.status} 試しファイルが金庫に残った`}`);
+      return fin('ok', '', '→ この鍵は書ける。社内便は通る。');
+    }
+    return fin('ng', `④ 書き …… ✕ ${wr.status} ${wr.msg}`, '',
+      wr.status === 403
+        ? '→ 読めるが書けない。この鍵の Contents は Read-only のまま。'
+          + 'GitHubで直したのなら、直した鍵とこの端末の鍵（上の頭11文字）が別物だ。'
+        : `→ 書きが ${wr.status} で落ちた。①〜③と併せて見る。`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('#s-test').addEventListener('click', selftest);
 
 $('#s-clear').addEventListener('click', () => {
   localStorage.removeItem(LS.token);
