@@ -63,13 +63,14 @@ let ledgerLoaded = false;
 function show(name) {
   VIEWS.forEach((v) => { $(`#view-${v}`).hidden = (v !== name); });
   $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  $('#opensetup').classList.toggle('on', name === 'setup');
   window.scrollTo(0, 0);
   if (name === 'ledger' && !ledgerLoaded) loadLedger();
 }
 
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 
-function openSetup() {
+function openSetup(focus) {
   const c = cfg();
   // 置き換え前のひな形（__OWNER__）は空欄として出す
   $('#s-owner').value = /^__/.test(c.owner) ? '' : c.owner;
@@ -78,8 +79,12 @@ function openSetup() {
   $('#s-msg').textContent = c.token ? '鍵は保存済み。貼り直すときだけ入力する。' : '';
   $('#s-msg').className = 'note';
   show('setup');
+  // すでに設定画面に居るときに⚙を押しても見た目が変わらず「効いていない」と読める。
+  // 押した手応えとして、鍵の欄に必ずカーソルを入れる
+  if (focus) $('#s-token').focus();
 }
-$('#opensetup').addEventListener('click', openSetup);
+$('#opensetup').addEventListener('click', () => openSetup(true));
+$('#gokey').addEventListener('click', () => openSetup(true));
 
 /* ================= 工場 ================= */
 
@@ -238,6 +243,7 @@ async function refresh(quiet) {
     const [sTxt, svg] = await Promise.all([pull('state/state.json'), pull('state/factory.svg')]);
     const st = JSON.parse(sTxt);
     try { localStorage.setItem(LS.state, sTxt); } catch (_) { /* 容量超過は無視 */ }
+    $('#nokey').hidden = true;
     renderState(st);
     $('#iso').innerHTML = svg;
     if (ledgerLoaded) { ledgerLoaded = false; if (!$('#view-ledger').hidden) loadLedger(); }
@@ -247,8 +253,9 @@ async function refresh(quiet) {
       try { renderState(JSON.parse(cached)); } catch (_) { /* 壊れたキャッシュは捨てる */ }
     }
     if (e instanceof NoKey) {
-      $('#iso').innerHTML = '<div class="isoskel">鍵を入れると社屋が映る（右上の⚙）</div>';
-      if (!quiet) openSetup();
+      $('#nokey').hidden = false;
+      $('#iso').innerHTML = '<div class="isoskel">鍵を入れると社屋が映る</div>';
+      if (!quiet) openSetup(false);
     } else {
       $('#stale').hidden = false;
       $('#stale').textContent = `つながらない：${e.message}${cached ? '（前に読んだ内容を表示中）' : ''}`;

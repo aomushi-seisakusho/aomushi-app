@@ -16,6 +16,10 @@ body{
   -webkit-text-size-adjust:100%;overscroll-behavior-y:contain;
 }
 button,input{font:inherit;color:inherit}
+button{touch-action:manipulation;cursor:pointer}
+/* 全要素からタップの光を消していたので、押しても当たったか分からなかった。
+   ボタンだけは押した瞬間に必ず色が変わるようにする */
+.btn:active,.mini-btn:active,.more:active,.segs button:active,.tabs button:active{filter:brightness(1.45)}
 
 /* ---- 上のバー ---- */
 .bar{
@@ -25,12 +29,18 @@ button,input{font:inherit;color:inherit}
 }
 .logo{width:14px;height:14px;background:var(--green);border:2px solid #101018;flex:none}
 .co{font-size:15px;letter-spacing:.1em;flex:1;min-width:0}
-.icobtn{width:34px;height:34px;flex:none;background:var(--bg);border:1px solid var(--line);
-  font-size:16px;line-height:1;color:var(--dim)}
-.icobtn:active{background:#22242f}
+.icobtn{width:44px;height:44px;flex:none;background:var(--bg);border:1px solid var(--line);
+  font-size:18px;line-height:1;color:var(--dim);transition:background .08s,transform .08s}
+.icobtn:active{background:#39405a;transform:scale(.92)}
+.icobtn.on{border-color:var(--green);color:var(--green)}
 .icobtn.spin{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+.nokey{margin:0;padding:11px 12px;background:#2a2416;border-bottom:2px solid var(--amber);
+  display:flex;gap:10px;align-items:center}
+.nokey p{flex:1;font-size:12px;color:var(--amber);line-height:1.5}
+.nokey button{flex:none;background:var(--amber);color:#101018;border:0;
+  padding:10px 14px;font-size:13px;min-height:44px}
 .stale{margin:0;padding:7px 12px;background:#332a16;border-bottom:1px solid var(--amber);
   color:var(--amber);font-size:11.5px}
 
@@ -105,8 +115,8 @@ main{padding:10px 10px 0}
 
 /* ---- 台帳 ---- */
 .ltools{display:grid;gap:7px}
-#q{width:100%;background:var(--panel);border:1px solid var(--line);padding:8px 10px;
-  font-size:13px;-webkit-appearance:none;border-radius:0}
+#q{width:100%;background:var(--panel);border:1px solid var(--line);padding:9px 10px;
+  font-size:16px;-webkit-appearance:none;border-radius:0}
 .segs{display:flex;gap:0;border:1px solid var(--line)}
 .segs button{flex:1;background:var(--panel);border:0;border-right:1px solid var(--line);
   padding:7px 0;font-size:11.5px;color:var(--dim)}
@@ -130,8 +140,8 @@ main{padding:10px 10px 0}
 /* ---- 設定 ---- */
 .fld{display:block;margin-bottom:10px}
 .fld span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px}
-.fld input{width:100%;background:var(--bg);border:1px solid var(--line);padding:9px 10px;
-  font-size:14px;-webkit-appearance:none;border-radius:0}
+.fld input{width:100%;background:var(--bg);border:1px solid var(--line);padding:11px 10px;
+  font-size:16px;-webkit-appearance:none;border-radius:0}
 .btnrow{display:flex;gap:8px}
 .btn{flex:1;background:var(--green);color:#101018;border:0;padding:11px;font-size:13px;letter-spacing:.05em}
 .btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
