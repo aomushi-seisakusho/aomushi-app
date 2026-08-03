@@ -17,7 +17,7 @@ const LS = {
 
 // この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
 // 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
-const APPV = 'v12';
+const APPV = 'v13';
 
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
@@ -337,6 +337,19 @@ $$('.tabs button').forEach((b) => b.addEventListener('click', () => show(b.datas
 
 /* 端末に何が入っているかを言葉で出す。鍵そのものは出さず、頭と長さだけ。
    「入れたはずなのに」を推測で潰さないための、唯一の手がかり */
+/* 配信中の版。sw.js を素で取りに行って中の V を読む。
+   端末の版と突き合わせれば「取り直しが要るのか、もう新しいのか」を推測しないで済む。
+   ここが分からないせいで「取り直したのに変わらない」を何度も水掛け論にした。 */
+let SRV = '';
+async function checkVersion() {
+  try {
+    const r = await fetch('sw.js?probe=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/aomushi-(v\d+)/);
+    SRV = m ? m[1] : '';
+  } catch (_) { SRV = ''; }
+  paintKeyState();
+}
+
 function paintKeyState() {
   const c = cfg();
   const el = $('#s-state');
@@ -344,13 +357,18 @@ function paintKeyState() {
   let probe = 'この端末は保存できる';
   if (!put('aomushi.probe', '1')) probe = 'この端末は保存できない（設定でサイトのデータが止められている）';
   else localStorage.removeItem('aomushi.probe');
+  const ver = SRV
+    ? (SRV === APPV
+        ? `　配信中も <b>${esc(SRV)}</b>。<b>最新。取り直しは要らない。</b>`
+        : `　<b class="warn">配信中は ${esc(SRV)}。この端末は古い＝取り直しが要る。</b>`)
+    : '　（配信中の版はまだ見に行けていない）';
   el.innerHTML = [
     c.token
       ? `鍵：<b>入っている</b>（${esc(c.token.slice(0, 11))}… 全${c.token.length}文字）`
       : '鍵：<b>入っていない</b>',
     `持ち主：${esc(c.owner || '未設定')}／金庫：${esc(c.repo || '未設定')}`,
     probe,
-    `アプリ：<b>${APPV}</b>（この端末が動かしている版）`,
+    `アプリ：<b>${APPV}</b>（この端末が動かしている版）${ver}`,
   ].join('<br>');
   el.className = 'note keystate ' + (c.token ? 'ok' : 'ng');
 }
@@ -364,6 +382,7 @@ function openSetup(focus) {
   $('#s-msg').textContent = c.token ? '貼り直すときだけ鍵の欄に入力する。' : '';
   $('#s-msg').className = 'note';
   paintKeyState();
+  checkVersion();     // 配信中の版を見に行く。返ったら実状の欄が自分で書き変わる
   paintShirase();
   show('setup');
   // すでに設定画面に居るときに⚙を押しても見た目が変わらず「効いていない」と読める。
@@ -1011,17 +1030,47 @@ async function selftest() {
 on('#s-test', 'click', selftest);
 
 /* 枠を丸ごと取り直す。ホーム画面のアプリは古い枠を掴んだまま離さないことがあり、
-   「新しくしたのに、その画面が無い」が起きる。押せば必ず本番の版になる。 */
+   「新しくしたのに、その画面が無い」が起きる。
+
+   ここは無言で死んでいた。押しても出るのは小さな灰色の1行だけで、
+   iPhoneのPWAは caches / serviceWorker の後始末が返ってこないことがある。
+   返ってこなければ開き直しに進まず、画面は押す前のまま＝「タップしても反応しない」。
+   だから ①押した手応えを大きく出す ②3秒で見切って必ず開き直す
+   ③開き直しが始まらなかったら、ボタンに頼らない道を赤字で出す。 */
 on('#s-fresh', 'click', async () => {
-  const msg = $('#s-msg');
-  msg.className = 'note'; msg.textContent = '取り直している…';
-  try {
+  const btn = $('#s-fresh'), msg = $('#s-msg'), fail = $('#s-fail');
+  const was = btn.textContent;
+  clearFail(fail);
+  btn.disabled = true;
+  btn.textContent = '取り直している…';
+  msg.className = 'note ok'; msg.textContent = '① 古い枠を捨てている…';
+  const clear = (async () => {
     if ('caches' in window)
       await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
     if ('serviceWorker' in navigator)
       await Promise.all((await navigator.serviceWorker.getRegistrations())
         .map((r) => r.unregister()));
-  } catch (_) {}
+  })().catch(() => {});
+  // 後始末が返らなくても先へ進む。捨てきれていなくても、開き直せば取り直せる
+  await Promise.race([clear, new Promise((r) => setTimeout(r, 3000))]);
+  msg.textContent = '② 開き直している…';
+
+  // 開き直しが始まらなかったときだけ、この札が残る（始まれば画面ごと消える）
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = was;
+    msg.className = 'note ng';
+    msg.textContent = '開き直しが始まらなかった。';
+    if (!fail) return;
+    fail.hidden = false;
+    fail.className = 'failbox';
+    fail.innerHTML = '<b class="fw">✕ この端末が古い枠を離さない</b>'
+      + '<span class="fn">次の一手：①アプリを完全に終了する'
+      + '（下から上へスワイプして止め、カードを上に飛ばす）→ 電波のある所で開き直す。<br>'
+      + '②それでも版が変わらなければ、ホーム画面のアイコンを削除して、'
+      + 'Safariで開き直して「ホーム画面に追加」。'
+      + '<b>この場合この端末の鍵は消えるので、Macで ./kagi.sh を走らせてQRを読み直す。</b></span>';
+  }, 4000);
   location.replace(location.pathname + '?v=' + Date.now());
 });
 
