@@ -15,6 +15,10 @@ const LS = {
   push:  'aomushi.push.id',        // 知らせの宛先ID（金庫の push/<id>.json と対）
 };
 
+// この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
+// 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
+const APPV = 'v12';
+
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
   owner:  localStorage.getItem(LS.owner) || DEF.owner  || '',
@@ -41,6 +45,8 @@ function put(k, v) {
 }
 
 const $  = (s) => document.querySelector(s);
+const on = (sel, ev, fn) => { const el = document.querySelector(sel);
+  if (el) el.addEventListener(ev, fn); return !!el; };
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -55,25 +61,35 @@ const YAKU = { boss:'編集長', kiroku:'記録係', saikutsu:'採掘係',
 /* ================= 金庫から読む ================= */
 
 class NoKey extends Error {}
+/* 失敗は必ず番号を連れて回る。「置けなかった」だけでは次の一手が出せない。
+   status 0 ＝ 電波そのものが届いていない */
+class ApiErr extends Error {
+  constructor(status, msg) { super(msg); this.status = status; }
+}
 
 async function pull(path) {
   const c = cfg();
   if (!c.token || !c.owner || !c.repo) throw new NoKey('鍵がまだ入っていない');
   const url = `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`
             + `?ref=${encodeURIComponent(c.branch)}`;
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      // raw を指定すると base64 を経由せずファイルの中身がそのまま返る
-      'Accept': 'application/vnd.github.raw',
-      'Authorization': `Bearer ${c.token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-  if (res.status === 401) throw new Error('鍵が違うか、期限が切れている');
-  if (res.status === 403) throw new Error('鍵にこの金庫を読む権限が無い');
-  if (res.status === 404) throw new Error(`金庫の中に ${path} が見つからない`);
-  if (!res.ok) throw new Error(`つながらない（${res.status}）`);
+  let res;
+  try {
+    res = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        // raw を指定すると base64 を経由せずファイルの中身がそのまま返る
+        'Accept': 'application/vnd.github.raw',
+        'Authorization': `Bearer ${c.token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+  } catch (_) {
+    throw new ApiErr(0, '通信が届かない（圏外か、遮断されている）');
+  }
+  if (res.status === 401) throw new ApiErr(401, '鍵が違うか、期限が切れている');
+  if (res.status === 403) throw new ApiErr(403, '鍵にこの金庫を読む権限が無い');
+  if (res.status === 404) throw new ApiErr(404, `金庫の中に ${path} が見つからない`);
+  if (!res.ok) throw new ApiErr(res.status, `つながらない（${res.status}）`);
   return res.text();
 }
 
@@ -82,26 +98,31 @@ async function push(path, text, message) {
   const c = cfg();
   if (!c.token || !c.owner || !c.repo) throw new NoKey('鍵がまだ入っていない');
   const url = `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'Authorization': `Bearer ${c.token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ message, content: b64utf8(text), branch: c.branch }),
-  });
-  if (res.status === 401) throw new Error('鍵が違うか、期限が切れている');
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${c.token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message, content: b64utf8(text), branch: c.branch }),
+    });
+  } catch (_) {
+    throw new ApiErr(0, '通信が届かない（圏外か、遮断されている）');
+  }
+  if (res.status === 401) throw new ApiErr(401, '鍵が違うか、期限が切れている');
   // 403と404を同じ文言に潰していたせいで、別の病気を同じ薬で治そうとして1回外した。
   // 403＝金庫は見えるが書けない／404＝そもそもこの鍵から金庫が見えていない
   if (res.status === 403)
-    throw new Error('鍵にこの金庫へ書き込む権限が無い（Contents を Read and write に）');
+    throw new ApiErr(403, '金庫は見えるが、書き込みを断られた');
   if (res.status === 404)
-    throw new Error('鍵からこの金庫が見えていない（鍵の対象リポジトリに入っていない／名前違い）');
+    throw new ApiErr(404, 'この鍵から金庫が見えていない');
   if (res.status === 409 || res.status === 422)
-    throw new Error('金庫が動いている最中だった。少し置いてもう一度');
-  if (!res.ok) throw new Error(`置けなかった（${res.status}）`);
+    throw new ApiErr(res.status, '金庫が動いている最中だった');
+  if (!res.ok) throw new ApiErr(res.status, `置けなかった（${res.status}）`);
   return res.json();
 }
 
@@ -152,6 +173,153 @@ function isoLocal(d) {
        + `${off >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
 }
 
+/* ================= 失敗の出し方 =================
+   黙って死なない。落ちたら必ず「何が起きたか」と「次に何を押すか」を赤字で出す。
+   番号ごとに病気が違う。同じ文言に潰すと、直す場所を間違える（実際に1回外した）。 */
+
+function gotoTest() {
+  openSetup(false);
+  const b = $('#s-test');
+  if (b) { b.scrollIntoView({ block: 'center' }); b.click(); }
+}
+
+function explainFail(e) {
+  if (e instanceof NoKey) return {
+    why: 'この端末に鍵が入っていない。金庫に置きに行けない。',
+    next: '右上の⚙で鍵を貼る。Macで ./kagi.sh を走らせてQRを読むのが一番確実。',
+    act: { label: '⚙を開く', go: () => openSetup(true) } };
+  const s = e && e.status;
+  if (s === 0) return {
+    why: '通信が届かなかった（圏外か、遮断されている）',
+    next: '電波を確かめて、もう一度送る。書いたものは消えていない。' };
+  if (s === 401) return {
+    why: '鍵が違うか、期限が切れている（401）',
+    next: 'GitHubで鍵を作り直して、Macで ./kagi.sh → 出たQRを読む。',
+    act: { label: '⚙を開く', go: () => openSetup(true) } };
+  if (s === 403) return {
+    why: '金庫は見えるが、書き込みを断られた（403）',
+    next: '鍵の Contents が Read-only のまま。Read and write に直す。'
+        + '直したのにここに来るなら、直した鍵とこの端末の鍵が別物だ。',
+    act: { label: '鍵を試す', go: gotoTest } };
+  if (s === 404) return {
+    why: 'この鍵から金庫が見えていない（404）',
+    next: '鍵の Repository access に金庫が入っているか、金庫の名前が合っているかを見る。'
+        + '権限より手前の問題。',
+    act: { label: '鍵を試す', go: gotoTest } };
+  if (s === 409 || s === 422) return {
+    why: `金庫が動いている最中だった（${s}）`,
+    next: '20秒ほど置いて、もう一度送る。' };
+  return {
+    why: (e && e.message) || '理由が分からない失敗',
+    next: 'もう一度送る。同じところで落ち続けるなら、⚙の「鍵を試す」で①〜⑤のどこで落ちるか見る。',
+    act: { label: '鍵を試す', go: gotoTest } };
+}
+
+/* 赤い箱を1つ出す。理由・次の一手・押せるボタンの3点セットで出す。 */
+function failInto(el, e, retry, retryLabel) {
+  if (!el) return;
+  const x = explainFail(e);
+  el.hidden = false;
+  el.className = 'failbox';
+  el.innerHTML = `<b class="fw">✕ ${esc(x.why)}</b>`
+               + `<span class="fn">次の一手：${esc(x.next)}</span>`
+               + `<span class="btnrow"></span>`;
+  const row = el.querySelector('.btnrow');
+  const add = (label, go) => {
+    const b = document.createElement('button');
+    b.className = 'btn ghost'; b.textContent = label;
+    b.addEventListener('click', go);
+    row.appendChild(b);
+  };
+  if (retry) add(retryLabel || 'もう一度送る', retry);
+  if (x.act) add(x.act.label, x.act.go);
+}
+const clearFail = (el) => { if (el) { el.hidden = true; el.innerHTML = ''; } };
+
+/* ================= いつ・どこまで進んだか =================
+   3つの札しか無い。
+     送った（未読） 金庫には置いた。Macはまだ取りに来ていない＝係は読んでいない
+     届いた         Macが取り込んだ。係が読んでいる最中（返事は数分かかる）
+     係が読んだ     返事が金庫に戻ってきた
+   「届いた」は配達係が押す印（state/recv.json）でしか分からない。推測で出さない。 */
+
+let RECV = { beat: '', recv: {} };
+
+const MIN = 60000;
+function ago(ts) {
+  const t = ts ? new Date(ts).getTime() : NaN;
+  if (!t || isNaN(t)) return '';
+  const m = Math.floor((Date.now() - t) / MIN);
+  if (m < 1) return 'たった今';
+  if (m < 60) return `${m}分前`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}時間前`;
+  return `${Math.floor(m / 1440)}日前`;
+}
+const hhmm = (ts) => {
+  const d = ts ? new Date(ts) : null;
+  return (d && !isNaN(d)) ? d.toLocaleString('ja-JP',
+    { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+};
+const minsSince = (ts) => {
+  const t = ts ? new Date(ts).getTime() : NaN;
+  return (!t || isNaN(t)) ? 0 : (Date.now() - t) / MIN;
+};
+
+/* 配達係は5分おきに金庫を見に来る。これを大きく超えて未読なら、
+   原因は「係が忙しい」ではなく「Macが動いていない」。そう書く。 */
+const LATE = 12;
+
+function trace(id, sentTs) {
+  const rep = (ST && ST.mail || []).find((m) => m.re === id);
+  if (rep) return rep.failed
+    ? { k: 'ng',   label: '配達できなかった', ts: rep.ts, rep }
+    : { k: 'read', label: '係が読んだ',       ts: rep.ts, rep };
+  const r = RECV.recv && RECV.recv[id];
+  if (r) return { k: 'recv', label: '届いた', ts: r.ts };
+  return { k: 'sent', label: '送った（未読）', ts: sentTs,
+           late: minsSince(sentTs) > LATE };
+}
+
+/* 札の下の1行。何を待っているのかを、待っている本人に分かる言葉で書く */
+function traceLine(t) {
+  if (t.k === 'sending') return '金庫に置いている…';
+  if (t.k === 'read')  return `${hhmm(t.ts)} に返事が戻った（${ago(t.ts)}）`;
+  if (t.k === 'ng')    return `${hhmm(t.ts)} に配達係が失敗を書いた。下の返事に理由が出ている`;
+  if (t.k === 'recv')  return `${hhmm(t.ts)} にMacが取り込んだ（${ago(t.ts)}）。係が読んでいる最中`;
+  const base = `${hhmm(t.ts)} に送った（${ago(t.ts)}）`;
+  return t.late
+    ? `${base}。${Math.floor(minsSince(t.ts))}分たっても取りに来ていない。Macが止まっているかもしれない`
+    : `${base}。次にMacが動いたときに係が読む`;
+}
+const statChip = (t) => `<span class="stat ${t.k}">${esc(t.label)}</span>`;
+
+/* 仕組みの説明。社内便と決裁の両方に同じものを出す（憲法4条の担保でもある） */
+const HOWTO = `
+<div class="flow">
+  <div class="fstep"><b>1</b><span class="stat sent">送った（未読）</span>
+    <p>非公開の金庫に置いただけ。<b>まだ誰も読んでいない。</b></p></div>
+  <div class="fstep"><b>2</b><span class="stat recv">届いた</span>
+    <p>Macが5分おきに金庫を見に来て、取り込んだ。係が読んでいる最中（返事まで数分）。</p></div>
+  <div class="fstep"><b>3</b><span class="stat read">係が読んだ</span>
+    <p>返事が金庫に戻った。「係からの返事」に出る。</p></div>
+</div>
+<p class="hnote"><b>Macが動くまで、係は読まない。</b>
+Macが閉じている・止まっている間、手紙は金庫でただ待つ。何時間でも待つ。<br>
+そしてどこまで進んでも<b>Threadsには何も出ない</b>（憲法4条）。出すのは編集長が自分で貼ったときだけ。</p>
+<p class="hbeat" data-beat></p>`;
+
+function paintBeat() {
+  const b = RECV.beat;
+  const txt = b
+    ? `配達係（Mac）が最後に動いたのは ${hhmm(b)}（${ago(b)}）。`
+      + (minsSince(b) > 60 ? ' 5分おきに動くはずなので、止まっている。' : ' 生きている。')
+    : '配達係がまだ一度も印を押していない（Macで haitatsu.py が走っていない）。';
+  $$('[data-beat]').forEach((el) => {
+    el.textContent = txt;
+    el.className = 'hbeat' + (!b || minsSince(b) > 60 ? ' late' : '');
+  });
+}
+
 /* ================= 画面の切り替え ================= */
 
 const VIEWS = ['factory', 'mail', 'kessai', 'ledger', 'setup'];
@@ -182,6 +350,7 @@ function paintKeyState() {
       : '鍵：<b>入っていない</b>',
     `持ち主：${esc(c.owner || '未設定')}／金庫：${esc(c.repo || '未設定')}`,
     probe,
+    `アプリ：<b>${APPV}</b>（この端末が動かしている版）`,
   ].join('<br>');
   el.className = 'note keystate ' + (c.token ? 'ok' : 'ng');
 }
@@ -294,34 +463,63 @@ function mdlite(src) {
   return out.join('');
 }
 
+/* 係からの返事（受け） */
+function inLine(m) {
+  const who = YAKU[m.from] || m.from || '係';
+  return `<li id="re-${esc(m.id)}" class="${m.failed ? 'bad' : ''}">
+    <div class="mh"><span class="who">${esc(who)}</span>
+      ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
+      <span class="mt">${esc(hhmm(m.ts))}</span></div>
+    <div class="mb">${mdlite(m.body)}</div>
+    </li>`;
+}
+
+/* 編集長が送った分（出し）。1通ごとに、今どこまで進んだかを必ず出す */
+function outLine(m) {
+  const t = m.flight ? { k: 'sending', label: '送っている…' } : trace(m.id, m.ts);
+  const rep = t.rep;
+  return `<li class="s-${t.k}">
+    <div class="mh"><span class="who">編集長 → ${esc(YAKU[m.to] || m.to || '')}</span>
+      ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
+      <span class="mt">${esc(hhmm(m.ts))}</span></div>
+    <div class="srow">${statChip(t)}<span class="sline">${esc(traceLine(t))}</span></div>
+    <div class="mb">${esc(m.body || '')}</div>
+    ${rep ? `<button class="jump" data-jump="re-${esc(rep.id)}">${
+      t.k === 'ng' ? '失敗の中身を見る' : '返事を読む'}</button>` : ''}
+    </li>`;
+}
+
 function renderMail(st) {
-  const line = (m, dir) => {
-    const who = dir === 'in'
-      ? (YAKU[m.from] || m.from || '係')
-      : `編集長 → ${YAKU[m.to] || m.to || ''}`;
-    const t = m.ts ? new Date(m.ts).toLocaleString('ja-JP',
-      { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-    return `<li class="${m.pending ? 'pending' : ''}">
-      <div class="mh"><span class="who">${esc(who)}</span>
-        ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
-        <span class="mt">${esc(t)}</span></div>
-      <div class="mb">${dir === 'in' ? mdlite(m.body) : esc(m.body || '')}</div>
-      ${m.pending ? '<div class="pnote">金庫に置いた。次にMacが動いたときに係が読む。</div>' : ''}
-      </li>`;
-  };
   const mail = st.mail || [], sent = st.sent || [];
-  // 金庫には届いたが state.json はまだ刷り直されていない分を、上に混ぜて出す
+  // 金庫には置いたが state.json はまだ刷り直されていない分を、上に混ぜて出す。
+  // 送った手紙は消さない。ここから消えるのは、金庫側の一覧に出たときだけ
   const known = new Set(sent.map((m) => m.id));
   const pend = loadPending().filter((m) => !known.has(m.id));
   savePending(pend);
-  const out = pend.map((m) => ({ ...m, pending: true })).concat(sent);
+  const out = pend.concat(sent)
+    .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+  if (FLIGHT.letter) out.unshift({ ...FLIGHT.letter, flight: true });
 
-  $('#mail').innerHTML = mail.length ? mail.map((m) => line(m, 'in')).join('')
+  $('#mail').innerHTML = mail.length ? mail.map(inLine).join('')
     : '<li class="empty">返事はまだ無い。手紙を出せば、次にMacが動いたときに係が読む。</li>';
-  $('#sent').innerHTML = out.length ? out.map((m) => line(m, 'out')).join('')
+  $('#sent').innerHTML = out.length ? out.map(outLine).join('')
     : '<li class="empty">まだ何も送っていない。</li>';
+
+  const unread = out.filter((m) => !m.flight && trace(m.id, m.ts).k === 'sent').length;
+  $('#sentstat').innerHTML = out.length
+    ? `送った ${out.length}通　／　まだ読まれていない <b class="${unread ? 'amb' : ''}">${unread}通</b>`
+    : '';
   $('#maildot').hidden = mail.length === 0;
+  paintBeat();
 }
+
+// 返事へ飛ぶ。長い一覧で「どれの返事か」を目で探させない
+on('#sent', 'click', (ev) => {
+  const b = ev.target.closest('[data-jump]');
+  if (!b) return;
+  const el = document.getElementById(b.dataset.jump);
+  if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); }
+});
 
 /* ================= 決裁（第3期・校了ボタン） =================
    校了しても Threads には何も出ない。出すのは編集長が自分で貼ったときだけ（憲法4条）。
@@ -335,7 +533,14 @@ const saveKes = (o) => put(LS.kes, JSON.stringify(o));
 
 const ST_CLS = { '校了': 'ok', '再校': 'ng', '初校': '' };
 
-function renderKessai(st) {
+/* 押した瞬間に見た目を変えるための、通信中だけの覚え書き。
+   金庫に届く前でも札が変わっていないと、押したのかどうか本人に分からない */
+const FLIGHT = { letter: null, kes: {} };
+let REASON = '';   // 差し戻しの理由を書いている原稿。書いている最中は画面を描き直さない
+
+function renderKessai(st, force) {
+  // 通信中・理由を書いている最中に、裏の自動更新で画面を消さない
+  if (!force && (REASON || Object.keys(FLIGHT.kes).length)) return;
   const ds = st.drafts || [];
   const pend = loadKes();
   // Mac側が印を付け終わった原稿は、待ち札を消す
@@ -343,54 +548,130 @@ function renderKessai(st) {
   saveKes(pend);
 
   $('#drafts').innerHTML = ds.length ? ds.map((d) => {
+    const f = FLIGHT.kes[d.n];
     const p = pend[d.n];
-    const st_ = p ? p.want : d.st;
-    return `<li class="${p ? 'pending' : ''}">
+    const st_ = (f && f.want) || (p && p.want) || d.st;
+    const t = f ? { k: 'sending', label: '送っている…' } : (p ? trace(p.id, p.ts) : null);
+    return `<li class="${t ? 's-' + t.k : ''}" data-li="${esc(d.n)}">
       <div class="dh"><b>${esc(d.n)}</b>
         <span class="badge ${ST_CLS[st_] || ''}">${esc(st_)}</span></div>
+      ${t ? `<div class="srow">${statChip(t)}<span class="sline">${esc(
+              t.k === 'read' ? `${hhmm(t.ts)} にMacが原稿に印を付けた（${ago(t.ts)}）`
+                             : traceLine(t))}</span></div>` : ''}
+      ${p && p.note ? `<div class="pnote">差し戻しの理由：${esc(p.note)}</div>` : ''}
       <div class="dt">${esc(d.body || d.h || '')}</div>
       ${d.reason ? `<div class="drea">検問：${esc(d.reason)}</div>` : ''}
-      ${p ? `<div class="pnote">${esc(p.want)}にした。次にMacが動いたとき原稿に印が付く。</div>` : `
+      ${t ? kesTail(d.n, t) : `
       <div class="btnrow">
-        <button class="btn kes-ok" data-n="${esc(d.n)}">校了</button>
-        <button class="btn ghost kes-ng" data-n="${esc(d.n)}">差し戻し</button>
+        <button class="btn kes-ok" data-n="${esc(d.n)}">校了にする</button>
+        <button class="btn ghost kes-ng" data-n="${esc(d.n)}">差し戻す</button>
         <button class="btn ghost kes-cp" data-n="${esc(d.n)}">本文をコピー</button>
       </div>`}
+      ${REASON === d.n ? `
+      <div class="rbox">
+        <label class="fld"><span>差し戻す理由（そのまま執筆係に渡る）</span>
+          <textarea class="r-note" rows="3"
+            placeholder="例：E-由来＝焼き直し。N-在庫から書き直し"></textarea></label>
+        <div class="btnrow">
+          <button class="btn kes-send" data-n="${esc(d.n)}">この理由で差し戻す</button>
+          <button class="btn ghost kes-cancel" data-n="${esc(d.n)}">やめる</button>
+        </div>
+      </div>` : ''}
+      <div class="failbox" id="kf-${esc(d.n)}" hidden></div>
       <p class="note kes-msg" id="km-${esc(d.n)}"></p>
     </li>`;
   }).join('') : '<li class="empty">下書きが無い。執筆係が書けば、ここに出る。</li>';
 
+  if (REASON) {
+    const ta = document.querySelector(`[data-li="${CSS.escape(REASON)}"] .r-note`);
+    if (ta) ta.focus();
+  }
   const waiting = ds.filter((d) => d.st === '初校' || d.st === '再校').length;
   $('#kesdot').hidden = waiting === 0;
+  paintBeat();
+}
+
+/* 決裁を出したあとの足元。取り消せるのは「まだMacが取りに来ていない」間だけ。
+   取り込まれたあとに「取り消せます」と出すのは嘘になる。 */
+function kesTail(n, t) {
+  const cp = `<button class="btn ghost kes-cp" data-n="${esc(n)}">本文をコピー</button>`;
+  if (t.k === 'sending') return '';
+  if (t.k === 'sent') return `<div class="btnrow">
+      <button class="btn ghost kes-undo" data-n="${esc(n)}">取り消す（まだ間に合う）</button>
+      ${cp}</div>`;
+  if (t.k === 'recv') return `<p class="note">Macがもう取り込んだ。これは取り消せない。
+      変えるなら、印が付いたあとにもう一度 決裁する。</p><div class="btnrow">${cp}</div>`;
+  return `<div class="btnrow">${cp}</div>`;
 }
 
 async function decide(n, want, note) {
-  const msg = $(`#km-${CSS.escape(n)}`);
   const d = new Date();
   const slip = {
     id: `${stamp(d)}-kessai-${n}`, kind: 'kessai',
     draft: n, action: want === '校了' ? 'pass' : 'reject',
     note: note || '', from: 'boss', ts: isoLocal(d),
   };
-  if (msg) { msg.className = 'note'; msg.textContent = '金庫に置いている…'; }
+  clearFail($(`#kf-${CSS.escape(n)}`));
+  REASON = '';
+  FLIGHT.kes[n] = { want };            // 押した瞬間に札と見出しを変える。通信を待たない
+  renderKessai(ST || {}, true);
   try {
     await push(`inbox/${slip.id}.json`, JSON.stringify(slip, null, 2) + '\n',
                `決裁：${n} を${want}`);
     const pend = loadKes();
-    pend[n] = { want, ts: slip.ts };
+    pend[n] = { want, ts: slip.ts, id: slip.id, note: note || '' };
     saveKes(pend);
-    renderKessai(ST || {});
+    delete FLIGHT.kes[n];
+    renderKessai(ST || {}, true);
   } catch (e) {
-    if (msg) {
-      msg.className = 'note ng';
-      msg.textContent = e instanceof NoKey
-        ? '鍵がまだ入っていない。右上の⚙から入れる。'
-        : `置けなかった：${e.message}`;
-    }
+    delete FLIGHT.kes[n];              // 見た目を押す前に戻す。送れていないのに校了に見せない
+    renderKessai(ST || {}, true);
+    failInto($(`#kf-${CSS.escape(n)}`), e, () => decide(n, want, note),
+             `もう一度「${want}」を送る`);
+    const m = $(`#km-${CSS.escape(n)}`);
+    if (m) { m.className = 'note ng';
+      m.textContent = `${want}の記録は金庫に残っていない。原稿はそのまま。`; }
   }
 }
 
-$('#drafts').addEventListener('click', async (ev) => {
+/* 取り消し＝金庫に置いた決裁票そのものを消す。
+   Macがまだ取りに来ていなければ、無かったことになる。 */
+async function undoKes(n) {
+  const p = loadKes()[n];
+  const msg = $(`#km-${CSS.escape(n)}`);
+  clearFail($(`#kf-${CSS.escape(n)}`));
+  if (!p || !p.id) {   // アプリを新しくする前に送った分には、票の名前が残っていない
+    if (msg) { msg.className = 'note ng';
+      msg.textContent = 'どの決裁票か分からないので取り消せない（アプリを新しくする前に送った分）。'; }
+    return;
+  }
+  if (msg) { msg.className = 'note'; msg.textContent = '取り消している…'; }
+  const c = cfg();
+  const path = `/repos/${c.owner}/${c.repo}/contents/inbox/${p.id}.json`;
+  try {
+    const cur = await api('GET', `${path}?ref=${encodeURIComponent(c.branch)}`);
+    if (cur.status === 200 && cur.data && cur.data.sha) {
+      const del = await api('DELETE', path,
+        { message: `決裁を取り消す：${n}`, branch: c.branch, sha: cur.data.sha });
+      if (del.status !== 200) throw new ApiErr(del.status, del.msg || '決裁票を消せなかった');
+    } else if (cur.status !== 404) {   // 404＝すでに金庫に無い。取り消しとしては成功
+      throw new ApiErr(cur.status, cur.msg || '決裁票を探しに行けなかった');
+    }
+    const pend = loadKes();
+    delete pend[n];
+    saveKes(pend);
+    renderKessai(ST || {}, true);
+    const m = $(`#km-${CSS.escape(n)}`);
+    if (m) { m.className = 'note ok';
+      m.textContent = '取り消した。決裁票は金庫から消えたので、係には渡らない。'; }
+  } catch (e) {
+    failInto($(`#kf-${CSS.escape(n)}`), e, () => undoKes(n), 'もう一度取り消す');
+    if (msg) { msg.className = 'note ng';
+      msg.textContent = '取り消せていない。決裁票は金庫に残ったまま。'; }
+  }
+}
+
+on('#drafts', 'click', async (ev) => {
   const b = ev.target.closest('button');
   if (!b) return;
   const n = b.dataset.n;
@@ -405,11 +686,14 @@ $('#drafts').addEventListener('click', async (ev) => {
     }
     return;
   }
-  if (b.classList.contains('kes-ok')) return decide(n, '校了', '');
-  if (b.classList.contains('kes-ng')) {
-    const note = prompt('差し戻す理由（執筆係に渡る）', '');
-    if (note === null) return;
-    return decide(n, '再校', note);
+  if (b.classList.contains('kes-ok'))   return decide(n, '校了', '');
+  if (b.classList.contains('kes-undo')) return undoKes(n);
+  // prompt() は、ホーム画面から開いたアプリだと出ない端末がある。画面の中で書かせる
+  if (b.classList.contains('kes-ng'))     { REASON = n;  renderKessai(ST || {}, true); return; }
+  if (b.classList.contains('kes-cancel')) { REASON = ''; renderKessai(ST || {}, true); return; }
+  if (b.classList.contains('kes-send')) {
+    const ta = document.querySelector(`[data-li="${CSS.escape(n)}"] .r-note`);
+    return decide(n, '再校', (ta && ta.value.trim()) || '');
   }
 });
 
@@ -443,12 +727,13 @@ function clearDraft() {
 ['#m-to', '#m-subject', '#m-body'].forEach((s) =>
   $(s).addEventListener('input', saveDraft));
 
-$('#m-send').addEventListener('click', async () => {
-  const btn = $('#m-send'), msg = $('#m-msg');
+async function sendLetter() {
+  const btn = $('#m-send'), msg = $('#m-msg'), fail = $('#m-fail');
   const to = $('#m-to').value;
   const subject = $('#m-subject').value.trim();
   const body = $('#m-body').value.trim();
   msg.className = 'note';
+  clearFail(fail);
   if (!body) { msg.className = 'note ng'; msg.textContent = '本文が空。'; return; }
 
   const d = new Date();
@@ -456,7 +741,10 @@ $('#m-send').addEventListener('click', async () => {
     id: `${stamp(d)}-${to}`, from: 'boss', to, subject, body, ts: isoLocal(d),
   };
   btn.disabled = true;
+  // 押した瞬間に、一覧の先頭へ「送っている…」で並べる。通信の返事は待たない
+  FLIGHT.letter = letter;
   msg.textContent = '金庫に置いている…';
+  renderMail(ST || {});
   try {
     await push(`inbox/${letter.id}.json`,
                JSON.stringify(letter, null, 2) + '\n',
@@ -464,17 +752,19 @@ $('#m-send').addEventListener('click', async () => {
     savePending([letter].concat(loadPending()));
     clearDraft();
     msg.className = 'note ok';
-    msg.textContent = `${YAKU[to] || to}あてに置いた。Threadsには何も出ていない。`;
-    renderMail(ST || {});
+    msg.textContent = `${YAKU[to] || to}あてに置いた。Threadsには何も出ていない。`
+                    + '下の一覧で「送った（未読）」になっている。';
   } catch (e) {
     msg.className = 'note ng';
-    msg.textContent = e instanceof NoKey
-      ? '鍵がまだ入っていない。右上の⚙から入れる。'
-      : `置けなかった：${e.message}（本文は消していない）`;
+    msg.textContent = '送れていない。書いたものは消していない。';
+    failInto(fail, e, sendLetter, 'もう一度送る');
   } finally {
+    FLIGHT.letter = null;
     btn.disabled = false;
+    renderMail(ST || {});
   }
-});
+}
+$('#m-send').addEventListener('click', sendLetter);
 
 $('#m-discard').addEventListener('click', () => {
   clearDraft();
@@ -570,8 +860,13 @@ async function refresh(quiet) {
   try {
     if (!hasKey()) throw new NoKey('鍵がまだ入っていない');
     // 社屋の絵が1枚読めないだけで会社ごと映らなくなるのは割に合わない。別々に扱う
-    const [sr, gr] = await Promise.allSettled([
-      pull('state/state.json'), pull('state/factory.svg')]);
+    const [sr, gr, rr] = await Promise.allSettled([
+      pull('state/state.json'), pull('state/factory.svg'), pull('state/recv.json')]);
+    // 受け取りの印。無くても会社は映す（古いMacだとまだ押していない）
+    if (rr.status === 'fulfilled') {
+      const r = jparse(rr.value, null);
+      RECV = (r && typeof r === 'object' && r.recv) ? r : { beat: '', recv: {} };
+    }
     if (sr.status === 'rejected') throw sr.reason;
     const sTxt = sr.value;
     const st = JSON.parse(sTxt);
@@ -713,7 +1008,22 @@ async function selftest() {
     btn.disabled = false;
   }
 }
-$('#s-test').addEventListener('click', selftest);
+on('#s-test', 'click', selftest);
+
+/* 枠を丸ごと取り直す。ホーム画面のアプリは古い枠を掴んだまま離さないことがあり、
+   「新しくしたのに、その画面が無い」が起きる。押せば必ず本番の版になる。 */
+on('#s-fresh', 'click', async () => {
+  const msg = $('#s-msg');
+  msg.className = 'note'; msg.textContent = '取り直している…';
+  try {
+    if ('caches' in window)
+      await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+    if ('serviceWorker' in navigator)
+      await Promise.all((await navigator.serviceWorker.getRegistrations())
+        .map((r) => r.unregister()));
+  } catch (_) {}
+  location.replace(location.pathname + '?v=' + Date.now());
+});
 
 /* ================= 知らせ（第4期） =================
    係の返事が金庫に入ったとき、Macから端末を突く。通知に会社の数字は載せない。
@@ -803,7 +1113,7 @@ async function shirase() {
     paintShirase();
   }
 }
-$('#s-push').addEventListener('click', shirase);
+on('#s-push', 'click', shirase);
 
 $('#s-clear').addEventListener('click', () => {
   localStorage.removeItem(LS.token);
@@ -834,7 +1144,16 @@ const INSTALLED = installKeyFromURL();
 restoreDraft();
 paintKeyBanner();
 paintKeyState();
+$$('[data-howto]').forEach((el) => { el.innerHTML = HOWTO; });   // 仕組みの説明
 renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
+
+/* 「3分前」は放っておくと3分前のまま固まる。待っている画面ほど、そこが効く。
+   書きかけ・通信中は renderKessai 側が自分で降りる。 */
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  renderMail(ST || {});
+  renderKessai(ST || {});
+}, 30000);
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
 refresh(false);
 

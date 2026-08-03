@@ -83,21 +83,27 @@
       <label class="fld"><span>本文</span>
         <textarea id="m-body" rows="5" placeholder="思いついたまま書いていい。あとで係が読む。"></textarea></label>
       <div class="btnrow">
-        <button id="m-send" class="btn">金庫に入れる</button>
+        <button id="m-send" class="btn">係に送る</button>
         <button id="m-discard" class="btn ghost">消す</button>
       </div>
       <p class="note" id="m-msg"></p>
-      <p class="note">これは係あての手紙。<b>Threadsには何も出ない</b>（憲法4条）。
-        非公開の金庫に置かれ、次にMacが動いたときに係が読む。</p>
+      <div class="failbox" id="m-fail" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>手紙が読まれるまで</h2>
+      <div data-howto></div>
+    </section>
+
+    <section class="panel">
+      <h2>編集長が送った分</h2>
+      <p class="note sentstat" id="sentstat"></p>
+      <ul class="mail" id="sent"><li class="empty">読みに行っている…</li></ul>
     </section>
 
     <section class="panel">
       <h2>係からの返事</h2>
-      <ul class="mail" id="mail"></ul>
-    </section>
-    <section class="panel">
-      <h2>編集長が送った分</h2>
-      <ul class="mail" id="sent"></ul>
+      <ul class="mail" id="mail"><li class="empty">読みに行っている…</li></ul>
     </section>
   </section>
 
@@ -123,9 +129,15 @@
       <h2>決裁（校了・差し戻し）</h2>
       <p class="note" style="margin:0 0 10px">
         校了にしても、Threadsには何も出ない（憲法4条）。出すのは編集長が自分で貼ったときだけ。
-        校了＝「これは貼っていい」という記録。本文はここからコピーできる。
+        校了＝「これは貼っていい」という記録。本文はここからコピーできる。<br>
+        <b>押した瞬間に札が変わる。Macが取りに来るまでは取り消せる。</b>
       </p>
-      <ul class="drafts" id="drafts"></ul>
+      <ul class="drafts" id="drafts"><li class="empty">読みに行っている…</li></ul>
+    </section>
+
+    <section class="panel">
+      <h2>決裁が原稿に届くまで</h2>
+      <div data-howto></div>
     </section>
   </section>
 
@@ -153,6 +165,7 @@
       <p class="note" id="s-msg"></p>
       <div class="btnrow" style="margin-top:12px">
         <button id="s-test" class="btn ghost">鍵を試す</button>
+        <button id="s-fresh" class="btn ghost">アプリを取り直す</button>
       </div>
       <p class="note" style="margin-top:6px">
         金庫に試しの1ファイルを置いて、すぐ消す。読みと書きを別々に見るので、
