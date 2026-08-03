@@ -17,7 +17,7 @@ const LS = {
 
 // この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
 // 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
-const APPV = 'v13';
+const APPV = 'v14';
 
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
@@ -163,6 +163,15 @@ function b64utf8(s) {
   return btoa(bin);
 }
 
+/* 鍵の見分け札。頭11文字だけ出していたが `github_pat_` はちょうど11文字＝
+   fine-grained の鍵は全部これで始まる。つまり2つの鍵を見分けるための表示が、
+   何一つ見分けていなかった（403の切り分けで実際に役に立たなかった）。
+   種別の後ろ7文字と末尾4文字を出す。これで別物かどうかは判る。 */
+function keyFrag(t) {
+  if (!t) return '';
+  return t.length > 26 ? `${t.slice(0, 18)}…${t.slice(-4)}` : `${t.slice(0, 8)}…`;
+}
+
 const pad = (n) => String(n).padStart(2, '0');
 const stamp = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
                    + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
@@ -199,7 +208,7 @@ function explainFail(e) {
   if (s === 403) return {
     why: '金庫は見えるが、書き込みを断られた（403）',
     next: '鍵の Contents が Read-only のまま。Read and write に直す。'
-        + '直したのにここに来るなら、直した鍵とこの端末の鍵が別物だ。',
+        + '直したのにここに来るなら、直した鍵とこの端末の鍵が別物だ（⚙の鍵の札で見比べる）。',
     act: { label: '鍵を試す', go: gotoTest } };
   if (s === 404) return {
     why: 'この鍵から金庫が見えていない（404）',
@@ -364,7 +373,7 @@ function paintKeyState() {
     : '　（配信中の版はまだ見に行けていない）';
   el.innerHTML = [
     c.token
-      ? `鍵：<b>入っている</b>（${esc(c.token.slice(0, 11))}… 全${c.token.length}文字）`
+      ? `鍵：<b>入っている</b>（${esc(keyFrag(c.token))} 全${c.token.length}文字）`
       : '鍵：<b>入っていない</b>',
     `持ち主：${esc(c.owner || '未設定')}／金庫：${esc(c.repo || '未設定')}`,
     probe,
@@ -979,7 +988,7 @@ async function selftest() {
   btn.disabled = true;
   out.textContent = '試している…';
   try {
-    say(`鍵 ${c.token.slice(0, 11)}…／全${c.token.length}文字`);
+    say(`鍵 ${keyFrag(c.token)}／全${c.token.length}文字`);
     say(`金庫 ${c.owner}/${c.repo}（${c.branch}）`);
     say('');
 
@@ -1021,7 +1030,7 @@ async function selftest() {
     return fin('ng', `④ 書き …… ✕ ${wr.status} ${wr.msg}`, '',
       wr.status === 403
         ? '→ 読めるが書けない。この鍵の Contents は Read-only のまま。'
-          + 'GitHubで直したのなら、直した鍵とこの端末の鍵（上の頭11文字）が別物だ。'
+          + 'GitHubで直したのなら、直した鍵とこの端末の鍵（上の札）が別物だ。'
         : `→ 書きが ${wr.status} で落ちた。①〜③と併せて見る。`);
   } finally {
     btn.disabled = false;
