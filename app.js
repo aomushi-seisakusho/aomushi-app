@@ -17,7 +17,7 @@ const LS = {
 
 // この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
 // 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
-const APPV = 'v14';
+const APPV = 'v15';
 
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
