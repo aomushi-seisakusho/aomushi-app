@@ -261,6 +261,35 @@ main{padding:10px 10px 0}
 .drafts .btn{flex:1;font-size:12px;padding:0 4px}
 .drafts .pnote{margin-top:8px;font-size:10.5px;color:var(--amber)}
 .drafts .kes-msg:empty{display:none}
+/* ---- 取材（採掘係の質問と、その場での答え） ----
+   決裁と同じ札・同じ枠を使う。編集長から見れば「答える」も決裁の一種だから、
+   見た目を変えると別の仕組みに見えてしまう。 */
+.shuzai{list-style:none;display:grid;gap:10px}
+.shuzai li{border:1px solid var(--line);background:#191720;padding:9px 10px;min-width:0}
+.shuzai li.s-sent{border-left:2px solid var(--amber)}
+.shuzai li.s-recv{border-left:2px solid var(--d)}
+.shuzai li.s-read{border-left:2px solid var(--green)}
+.shuzai li.s-ng{border-left:2px solid var(--red)}
+.shuzai li.s-sending{border-left:2px solid var(--line)}
+.shuzai .dh{display:flex;align-items:center;gap:8px;font-size:12px}
+.shuzai .dh b{color:var(--sub)}
+.shuzai .badge{margin-left:auto;flex:none;border:1px solid var(--line);color:var(--dim);
+  font-size:10.5px;padding:1px 7px;border-radius:9px}
+.shuzai .badge.ok{color:var(--green);border-color:#2f5c39}
+.shuzai .badge.ng{color:var(--amber);border-color:#5c4f2a}
+/* 質問そのもの。この画面で一番大きい字にする（本文が無いと言われ続けた当のもの） */
+.shuzai .qt{font-size:13.5px;color:var(--ink);line-height:1.8;margin-top:7px;
+  border-left:2px solid var(--a);padding-left:9px;word-break:break-word}
+.shuzai .qm{font-size:10.5px;color:var(--dim);margin-top:5px;padding-left:11px}
+.shuzai .fld{margin:9px 0 0}
+.shuzai textarea{min-height:92px}
+.shuzai .btnrow{margin-top:9px}
+.shuzai .btn{flex:1;font-size:12px;padding:0 4px}
+.shuzai .qn{margin-top:7px;font-size:11px;line-height:1.6}
+.shuzai .shu-msg:empty{display:none}
+.shuzai code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+
 /* 差し戻しの理由。prompt() が出ない端末があるので、画面の中で書かせる */
 .rbox{margin-top:9px;border:1px solid #5c4f2a;background:#221d12;padding:9px 10px}
 .rbox .fld{margin-bottom:8px}

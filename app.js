@@ -12,12 +12,14 @@ const LS = {
   pend:  'aomushi.sent.pending',   // 金庫に置いたが、まだ state.json に載っていない手紙
   draft: 'aomushi.mail.draft',     // 書きかけ。アプリが裏に回っても消えないように
   kes:   'aomushi.kessai.pending', // 決裁票は置いたが、まだ原稿に印が付いていない分
+  ansd:  'aomushi.shuzai.draft',   // 取材の答えの書きかけ（質問ごと）
+  shu:   'aomushi.shuzai.pending', // 答えは置いたが、まだ在庫に入っていない分
   push:  'aomushi.push.id',        // 知らせの宛先ID（金庫の push/<id>.json と対）
 };
 
 // この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
 // 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
-const APPV = 'v15';
+const APPV = 'v16';
 
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
@@ -56,7 +58,9 @@ const nf = (n) => Number(n || 0).toLocaleString('ja-JP');
 // 型の色。出していいのは手分類だけ（自動判定は信用しない）
 const TYPE_COLOR = { A: '#F06292', D: '#4FC3F7', 'D-': '#3a7ea0', B: '#D4C34A', C: '#8a8fa8' };
 const YAKU = { boss:'編集長', kiroku:'記録係', saikutsu:'採掘係',
-               shippitsu:'執筆係', kenmon:'検問係', teisatsu:'偵察係' };
+               shippitsu:'執筆係', kenmon:'検問係', teisatsu:'偵察係',
+               // 決裁と取材の写しを書くのは係ではなく配達係。ここに無いと生の英字が出ていた
+               haitatsu:'配達係' };
 
 /* ================= 金庫から読む ================= */
 
@@ -411,6 +415,8 @@ function renderState(st) {
     `<span class="chip${warn ? ' warn' : ''}">${esc(label)} <b>${esc(val)}</b></span>`;
   $('#chips').innerHTML = [
     chip('在庫 N-', c.zaiko, (c.zaiko || 0) === 0),
+    // 未回答が0＝在庫が増える見込みも0。ここは在庫の隣に出す
+    chip('取材', `未回答${nf(c.toi)}問`, (c.toi || 0) > 0),
     chip('取材地図 E-', c.chizu),
     chip('台帳', `${nf(c.ledger)}本`),
     chip('実測', `${nf(c.measured)}本`),
@@ -437,6 +443,7 @@ function renderState(st) {
     : '<li class="empty">まだ動きが無い。</li>';
 
   renderMail(st);
+  renderShuzai(st);
   renderKessai(st);
 
   const g = st.generated_at ? new Date(st.generated_at) : null;
@@ -563,7 +570,7 @@ const ST_CLS = { '校了': 'ok', '再校': 'ng', '初校': '' };
 
 /* 押した瞬間に見た目を変えるための、通信中だけの覚え書き。
    金庫に届く前でも札が変わっていないと、押したのかどうか本人に分からない */
-const FLIGHT = { letter: null, kes: {} };
+const FLIGHT = { letter: null, kes: {}, shu: {} };
 let REASON = '';   // 差し戻しの理由を書いている原稿。書いている最中は画面を描き直さない
 
 function renderKessai(st, force) {
@@ -614,10 +621,15 @@ function renderKessai(st, force) {
     const ta = document.querySelector(`[data-li="${CSS.escape(REASON)}"] .r-note`);
     if (ta) ta.focus();
   }
-  const waiting = ds.filter((d) => d.st === '初校' || d.st === '再校').length;
-  $('#kesdot').hidden = waiting === 0;
+  KES_WAIT = ds.filter((d) => d.st === '初校' || d.st === '再校').length;
+  paintKesDot();
   paintBeat();
 }
+
+/* 決裁タブの赤丸。決裁待ちの原稿と、未回答の取材質問の両方で点く。
+   質問に答えないと在庫が増えない＝会社が止まるので、原稿と同じ重さで出す。 */
+let KES_WAIT = 0, SHU_WAIT = 0;
+function paintKesDot() { $('#kesdot').hidden = (KES_WAIT + SHU_WAIT) === 0; }
 
 /* 決裁を出したあとの足元。取り消せるのは「まだMacが取りに来ていない」間だけ。
    取り込まれたあとに「取り消せます」と出すのは嘘になる。 */
@@ -662,6 +674,20 @@ async function decide(n, want, note) {
   }
 }
 
+/* 金庫に置いた手紙そのものを消す。Macがまだ取りに来ていなければ、無かったことになる。
+   404＝すでに金庫に無い＝取り消しとしては成功。決裁票と取材の答えの両方が使う。 */
+async function deleteLetter(id, message) {
+  const c = cfg();
+  const path = `/repos/${c.owner}/${c.repo}/contents/inbox/${id}.json`;
+  const cur = await api('GET', `${path}?ref=${encodeURIComponent(c.branch)}`);
+  if (cur.status === 200 && cur.data && cur.data.sha) {
+    const del = await api('DELETE', path, { message, branch: c.branch, sha: cur.data.sha });
+    if (del.status !== 200) throw new ApiErr(del.status, del.msg || '手紙を消せなかった');
+    return;
+  }
+  if (cur.status !== 404) throw new ApiErr(cur.status, cur.msg || '手紙を探しに行けなかった');
+}
+
 /* 取り消し＝金庫に置いた決裁票そのものを消す。
    Macがまだ取りに来ていなければ、無かったことになる。 */
 async function undoKes(n) {
@@ -674,17 +700,8 @@ async function undoKes(n) {
     return;
   }
   if (msg) { msg.className = 'note'; msg.textContent = '取り消している…'; }
-  const c = cfg();
-  const path = `/repos/${c.owner}/${c.repo}/contents/inbox/${p.id}.json`;
   try {
-    const cur = await api('GET', `${path}?ref=${encodeURIComponent(c.branch)}`);
-    if (cur.status === 200 && cur.data && cur.data.sha) {
-      const del = await api('DELETE', path,
-        { message: `決裁を取り消す：${n}`, branch: c.branch, sha: cur.data.sha });
-      if (del.status !== 200) throw new ApiErr(del.status, del.msg || '決裁票を消せなかった');
-    } else if (cur.status !== 404) {   // 404＝すでに金庫に無い。取り消しとしては成功
-      throw new ApiErr(cur.status, cur.msg || '決裁票を探しに行けなかった');
-    }
+    await deleteLetter(p.id, `決裁を取り消す：${n}`);
     const pend = loadKes();
     delete pend[n];
     saveKes(pend);
@@ -723,6 +740,197 @@ on('#drafts', 'click', async (ev) => {
     const ta = document.querySelector(`[data-li="${CSS.escape(n)}"] .r-note`);
     return decide(n, '再校', (ta && ta.value.trim()) || '');
   }
+});
+
+/* ================= 取材（採掘係の質問に答える） =================
+   質問の本文は金庫の state.json から来る。アプリは質問を作らないし、答えも直さない。
+   ここに答えを置く → Macが取り込む → vault/episodes.md に N- が1本増える。
+   **在庫が増える道はここだけ。** そしてここでもThreadsには何も出ない（憲法4条）。 */
+
+const loadAns = () => {
+  const v = jparse(localStorage.getItem(LS.ansd), {});
+  return (v && typeof v === 'object') ? v : {};
+};
+const saveAns = (o) => put(LS.ansd, JSON.stringify(o));
+const loadShu = () => {
+  const v = jparse(localStorage.getItem(LS.shu), []);
+  return Array.isArray(v) ? v : [];
+};
+const saveShu = (a) => put(LS.shu, JSON.stringify(a.slice(0, 30)));
+
+let SHU_TYPING = '';   // いま答えを書いている質問。裏の自動更新で書きかけを消さない
+
+/* 答えを置いたあとの札。「係が読んだ」ではなく「在庫に入った」と書く。
+   ここで待っているのは返事ではなく、N-在庫が1本増えることだから。 */
+function shuLine(t, n) {
+  if (t.k === 'read') return n ? `${hhmm(t.ts)} に ${n} として在庫に入った（${ago(t.ts)}）`
+                               : `${hhmm(t.ts)} にMacが在庫に写した（${ago(t.ts)}）`;
+  if (t.k === 'recv') return `${hhmm(t.ts)} にMacが取り込んだ（${ago(t.ts)}）。在庫に写している最中`;
+  if (t.k === 'ng')   return `${hhmm(t.ts)} に在庫にできなかった。理由は社内便の「係からの返事」に出ている`;
+  const base = `${hhmm(t.ts)} に置いた（${ago(t.ts)}）`;
+  // ここで待っているのは返事ではなく、N-在庫が1本増えること。そう書く
+  return t.late
+    ? `${base}。${Math.floor(minsSince(t.ts))}分たっても取りに来ていない。Macが止まっているかもしれない`
+    : `${base}。次にMacが動いたときにN-在庫に入る`;
+}
+
+function renderShuzai(st, force) {
+  if (!force && (SHU_TYPING || Object.keys(FLIGHT.shu).length)) return;
+  const qs = st.shuzai || [];
+  const drafts = loadAns();
+
+  // 置いた答えの手紙。この端末の控えと金庫側の一覧を突き合わせる（金庫側が正）。
+  // 端末を変えても「もう答えた」が出るように、金庫の分も見る
+  const letters = {};
+  loadShu().forEach((l) => { if (l.q) letters[l.q] = l; });
+  (st.shuzai_sent || []).forEach((l) => { if (l.q) letters[l.q] = l; });
+  // 在庫に入り終わった質問の控えは落とす（待ち札を出しっぱなしにしない）
+  const done = new Set(qs.filter((q) => q.st !== '未回答').map((q) => q.id));
+  saveShu(loadShu().filter((l) => !done.has(l.q)));
+
+  $('#shuzai').innerHTML = qs.length ? qs.map((q) => {
+    const f = FLIGHT.shu[q.id];
+    const l = letters[q.id];
+    const zumi = q.st !== '未回答';
+    const t = f ? { k: 'sending', label: '送っている…' }
+              : (zumi ? { k: 'read', label: '在庫に入った', ts: q.ans_ts }
+                      : (l ? trace(l.id, l.ts) : null));
+    const meta = [q.e && q.e !== '（指定なし）' ? `隣：${q.e}` : '',
+                  q.nerai && q.nerai !== '（無し）' ? `狙い：${q.nerai}` : ''].filter(Boolean);
+    // 在庫にできなかったときは、書いた答えを欄に戻してもう一度置けるようにする。
+    // 札だけ出して欄を閉じると、その質問に二度と答えられなくなる（行き止まり）
+    const stuck = !!(t && t.k === 'ng');
+    const kaku = !zumi && (!t || stuck);
+    const moto = drafts[q.id] || (stuck && l ? l.body : '') || '';
+    return `<li class="${t ? 's-' + t.k : ''}" data-q="${esc(q.id)}">
+      <div class="dh"><b>${esc(q.id)}</b>
+        <span class="badge ${zumi ? 'ok' : 'ng'}">${esc(zumi ? '在庫になった' : '未回答')}</span></div>
+      <div class="qt">${esc(q.q)}</div>
+      ${meta.length ? `<div class="qm">${esc(meta.join('　／　'))}</div>` : ''}
+      ${t ? `<div class="srow">${statChip(
+              // 札の言葉も取材のものに直す。ここで待っているのは返事ではなく在庫だから
+              t.k === 'ng' ? { ...t, label: '在庫にできなかった' } : t)}<span class="sline">${esc(
+              t.k === 'sending' ? '金庫に置いている…' : shuLine(t, q.n))}</span></div>` : ''}
+      ${zumi && q.n ? `<p class="note ok qn">${esc(q.n)} になった。未使用の在庫として積んである。
+        執筆係に書かせるときは、この番号を指定する。</p>` : ''}
+      ${kaku ? `
+      <label class="fld"><span>答え（このまま在庫の本文になる。話し言葉でいい）</span>
+        <textarea class="a-note" rows="4"
+          placeholder="そのとき誰が何て言ったか、そのままの言葉で。">${esc(moto)}</textarea></label>
+      <div class="btnrow">
+        <button class="btn shu-send" data-q="${esc(q.id)}">${
+          stuck ? 'もう一度、在庫にする' : 'この答えを在庫にする'}</button>
+        <button class="btn ghost shu-clear" data-q="${esc(q.id)}">消す</button>
+      </div>` : ''}
+      ${(!zumi && t && t.k === 'sent') ? `<div class="btnrow">
+        <button class="btn ghost shu-undo" data-q="${esc(q.id)}">取り消す（まだ間に合う）</button>
+      </div>` : ''}
+      <div class="failbox" id="sf-${esc(q.id)}" hidden></div>
+      <p class="note shu-msg" id="sm-${esc(q.id)}"></p>
+    </li>`;
+  }).join('')
+    // 金庫をまだ読めていない（shuzai が無い）のと、読んだ結果0問なのは別物。混ぜない
+    : (st.shuzai
+        ? `<li class="empty">採掘係からの質問がまだ無い。<br>
+           Macで <code>python3 shuzai.py --new</code> を走らせると、採掘係が3問まで出してここに並ぶ。</li>`
+        : '<li class="empty">読みに行っている…</li>');
+
+  SHU_WAIT = qs.filter((q) => q.st === '未回答' && !letters[q.id]).length;
+  paintKesDot();
+}
+
+async function sendAnswer(qid) {
+  const ta = document.querySelector(`[data-q="${CSS.escape(qid)}"] .a-note`);
+  const body = (ta && ta.value.trim()) || '';
+  const msg = $(`#sm-${CSS.escape(qid)}`);
+  clearFail($(`#sf-${CSS.escape(qid)}`));
+  if (!body) {
+    if (msg) { msg.className = 'note ng'; msg.textContent = '答えが空。'; }
+    return;
+  }
+  const d = new Date();
+  const letter = {
+    id: `${stamp(d)}-shuzai-${qid}`, kind: 'shuzai', q: qid,
+    from: 'boss', to: 'saikutsu', subject: `取材の答え：${qid}`,
+    body, ts: isoLocal(d),
+  };
+  SHU_TYPING = '';
+  FLIGHT.shu[qid] = letter;         // 押した瞬間に札を変える。通信を待たない
+  renderShuzai(ST || {}, true);
+  try {
+    await push(`inbox/${letter.id}.json`, JSON.stringify(letter, null, 2) + '\n',
+               `取材の答え：${qid}`);
+    saveShu([letter].concat(loadShu().filter((l) => l.q !== qid)));
+    const dr = loadAns(); delete dr[qid]; saveAns(dr);   // 置けた分だけ書きかけを消す
+    delete FLIGHT.shu[qid];
+    renderShuzai(ST || {}, true);
+    const m = $(`#sm-${CSS.escape(qid)}`);
+    if (m) { m.className = 'note ok';
+      m.textContent = '金庫に置いた。次にMacが動いたときにN-在庫に入る。Threadsには何も出ていない。'; }
+  } catch (e) {
+    delete FLIGHT.shu[qid];
+    renderShuzai(ST || {}, true);   // 書きかけは控えから戻る。消さない
+    failInto($(`#sf-${CSS.escape(qid)}`), e, () => sendAnswer(qid), 'もう一度置く');
+    const m = $(`#sm-${CSS.escape(qid)}`);
+    if (m) { m.className = 'note ng';
+      m.textContent = '置けていない。答えは消していない。在庫も増えていない。'; }
+  }
+}
+
+/* 取り消し。Macが取り込む前なら、答えの手紙ごと無かったことにできる */
+async function undoAnswer(qid) {
+  const l = loadShu().find((x) => x.q === qid);
+  const msg = $(`#sm-${CSS.escape(qid)}`);
+  clearFail($(`#sf-${CSS.escape(qid)}`));
+  if (!l) {
+    if (msg) { msg.className = 'note ng';
+      msg.textContent = 'どの手紙か分からないので取り消せない（この端末から送った分ではない）。'; }
+    return;
+  }
+  if (msg) { msg.className = 'note'; msg.textContent = '取り消している…'; }
+  try {
+    await deleteLetter(l.id, `取材の答えを取り消す：${qid}`);
+    saveShu(loadShu().filter((x) => x.q !== qid));
+    const dr = loadAns(); dr[qid] = l.body; saveAns(dr);   // 書いたものは欄に戻す
+    renderShuzai(ST || {}, true);
+    const m = $(`#sm-${CSS.escape(qid)}`);
+    if (m) { m.className = 'note ok';
+      m.textContent = '取り消した。答えは欄に戻してある。在庫は増えていない。'; }
+  } catch (e) {
+    failInto($(`#sf-${CSS.escape(qid)}`), e, () => undoAnswer(qid), 'もう一度取り消す');
+    if (msg) { msg.className = 'note ng'; msg.textContent = '取り消せていない。手紙は金庫に残ったまま。'; }
+  }
+}
+
+on('#shuzai', 'click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  const q = b.dataset.q;
+  if (b.classList.contains('shu-send')) return sendAnswer(q);
+  if (b.classList.contains('shu-undo')) return undoAnswer(q);
+  if (b.classList.contains('shu-clear')) {
+    const dr = loadAns(); delete dr[q]; saveAns(dr);
+    SHU_TYPING = '';
+    renderShuzai(ST || {}, true);
+    const m = $(`#sm-${CSS.escape(q)}`);
+    if (m) { m.className = 'note'; m.textContent = '書きかけを消した。'; }
+  }
+});
+
+/* 書きかけは1文字ごとに端末に残す。アプリが裏に回っても、通信に失敗しても消えない。
+   書いている間は裏の自動更新で画面を組み直さない（打っている途中で消えるのを防ぐ） */
+on('#shuzai', 'input', (ev) => {
+  const ta = ev.target.closest('.a-note');
+  if (!ta) return;
+  const li = ta.closest('[data-q]');
+  if (!li) return;
+  const dr = loadAns();
+  dr[li.dataset.q] = ta.value;
+  saveAns(dr);
+  SHU_TYPING = ta.value.trim() ? li.dataset.q : '';
+});
+on('#shuzai', 'focusout', (ev) => {
+  if (ev.target.closest('.a-note')) SHU_TYPING = '';
 });
 
 /* ================= 手紙を出す（第2期） ================= */
@@ -1204,12 +1412,14 @@ paintKeyBanner();
 paintKeyState();
 $$('[data-howto]').forEach((el) => { el.innerHTML = HOWTO; });   // 仕組みの説明
 renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
+renderShuzai({}); // 質問は金庫から来る。読めるまでは「まだ無い」ではなく空欄のまま出す
 
 /* 「3分前」は放っておくと3分前のまま固まる。待っている画面ほど、そこが効く。
    書きかけ・通信中は renderKessai 側が自分で降りる。 */
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   renderMail(ST || {});
+  renderShuzai(ST || {});
   renderKessai(ST || {});
 }, 30000);
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
