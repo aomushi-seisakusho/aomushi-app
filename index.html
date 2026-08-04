@@ -12,7 +12,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css">
+<!-- ?v16 は飾りではない。配信元(GitHub Pages)は中身を10分キャッシュするので、
+     index.html だけ新しくなって app.js が古いまま、という食い違いが実際に起きた
+     （枠は出るのに何も押せない）。版を上げたらこの番号も上げる＝別のURLになる。 -->
+<link rel="stylesheet" href="style.css?v16">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 </head>
@@ -207,6 +210,6 @@
 </nav>
 
 <script src="config.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v16"></script>
 </body>
 </html>

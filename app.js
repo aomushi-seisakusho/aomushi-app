@@ -829,11 +829,15 @@ function renderShuzai(st, force) {
       <p class="note shu-msg" id="sm-${esc(q.id)}"></p>
     </li>`;
   }).join('')
-    // 金庫をまだ読めていない（shuzai が無い）のと、読んだ結果0問なのは別物。混ぜない
+    // 3つを混ぜない：まだ読めていない／金庫の材料が古い／読んだ結果0問。
+    // 「読みに行っている…」が消えないまま何も押せない、が実際に起きた
     : (st.shuzai
         ? `<li class="empty">採掘係からの質問がまだ無い。<br>
            Macで <code>python3 shuzai.py --new</code> を走らせると、採掘係が3問まで出してここに並ぶ。</li>`
-        : '<li class="empty">読みに行っている…</li>');
+        : (st.generated_at
+            ? `<li class="empty">金庫の材料に取材の欄がまだ無い（Mac側が古い）。<br>
+               Macで <code>python3 state.py</code> を走らせれば、次の配達でここに出る。</li>`
+            : '<li class="empty">読みに行っている…</li>'));
 
   SHU_WAIT = qs.filter((q) => q.st === '未回答' && !letters[q.id]).length;
   paintKesDot();
