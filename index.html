@@ -12,10 +12,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
-<!-- ?v16 は飾りではない。配信元(GitHub Pages)は中身を10分キャッシュするので、
+<!-- ?v17 は飾りではない。配信元(GitHub Pages)は中身を10分キャッシュするので、
      index.html だけ新しくなって app.js が古いまま、という食い違いが実際に起きた
      （枠は出るのに何も押せない）。版を上げたらこの番号も上げる＝別のURLになる。 -->
-<link rel="stylesheet" href="style.css?v16">
+<link rel="stylesheet" href="style.css?v17">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 </head>
@@ -50,8 +50,17 @@
 
     <div class="housou" id="housou" hidden><i class="spk"></i><span></span></div>
 
+    <!-- 今日の要件は決裁タブに積まれる。工場からは入口だけ出す -->
     <section class="panel">
-      <h2>決裁デスク</h2>
+      <h2>今日の要件</h2>
+      <ol class="todo" id="today-mini"><li class="empty">読みに行っている…</li></ol>
+      <div class="btnrow" style="margin-top:10px">
+        <button class="btn" data-go="kessai">決裁箱をひらく</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>会社の宿題（条件が直れば自分で消える）</h2>
       <ul class="inbox" id="inboxtasks"></ul>
     </section>
 
@@ -68,46 +77,80 @@
     <p class="note" id="gen"></p>
   </section>
 
-  <!-- ============ 社内便 ============ -->
-  <section id="view-mail" class="view" hidden>
+  <!-- ============ 決裁（会社の唯一の窓口） ============ -->
+  <section id="view-kessai" class="view" hidden>
+
+    <section class="panel todaybox">
+      <h2>今日やること</h2>
+      <ol class="todo" id="today"><li class="empty">読みに行っている…</li></ol>
+      <p class="note" id="gapnote"></p>
+    </section>
 
     <section class="panel">
-      <h2>係に手紙を出す</h2>
-      <label class="fld"><span>宛先</span>
-        <select id="m-to">
-          <option value="kiroku">記録係（数字・台帳）</option>
-          <option value="saikutsu">採掘係（出来事を掘る）</option>
-          <option value="shippitsu">執筆係（下書きを書く）</option>
-          <option value="kenmon">検問係（下書きを落とす）</option>
-          <option value="teisatsu">偵察係（題材の熱）</option>
+      <h2>ネタを放る（1行でいい）</h2>
+      <p class="note" style="margin:0 0 9px">
+        思い出した出来事を1行書いて放ると、<b>そのままN-在庫が1本増える。</b>
+        細部（誰が・そのままの言葉・僕の感情）は空のまま積まれるので、
+        あとで下の「在庫の空欄」で埋める。ここでもThreadsには何も出ない。
+      </p>
+      <label class="fld"><span>出来事（1行）</span>
+        <textarea id="n-body" rows="2"
+          placeholder="例：ハナが泣いた。ヨガの先生に断られた話"></textarea></label>
+      <label class="fld"><span>どこの話か</span>
+        <select id="n-moto">
+          <option value="session">受講生セッション</option>
+          <option value="genba">本業の現場</option>
+          <option value="jinsei">教師・寮監・過去</option>
+          <option value="soudan">相談（新事業）</option>
+          <option value="other" selected>その他</option>
         </select></label>
-      <label class="fld"><span>件名（無くてもいい）</span>
-        <input id="m-subject" type="text" autocomplete="off" placeholder="例：運動会の話の隣を掘って"></label>
-      <label class="fld"><span>本文</span>
-        <textarea id="m-body" rows="5" placeholder="思いついたまま書いていい。あとで係が読む。"></textarea></label>
       <div class="btnrow">
-        <button id="m-send" class="btn">係に送る</button>
-        <button id="m-discard" class="btn ghost">消す</button>
+        <button id="n-send" class="btn">在庫に放る</button>
+        <button id="n-discard" class="btn ghost">消す</button>
       </div>
-      <p class="note" id="m-msg"></p>
-      <div class="failbox" id="m-fail" hidden></div>
+      <p class="note" id="n-msg"></p>
+      <div class="failbox" id="n-fail" hidden></div>
     </section>
 
     <section class="panel">
-      <h2>手紙が読まれるまで</h2>
-      <div data-howto></div>
+      <h2>決裁箱 <em id="boxn"></em></h2>
+      <p class="note" style="margin:0 0 10px">
+        毎朝、係がここに<b>今日の要件</b>を積む。取材の質問も、下書きの校了も、在庫の空欄も全部ここ。<br>
+        <b>片づけたものは、押した瞬間にこの箱から消える。</b>足取りは下の「さっき片づけた分」に残る。
+        校了しても<b>Threadsには何も出ない</b>（憲法4条）。出すのは編集長が自分で貼ったときだけ。
+      </p>
+      <ul class="box" id="box"><li class="empty">読みに行っている…</li></ul>
     </section>
 
-    <section class="panel">
-      <h2>編集長が送った分</h2>
-      <p class="note sentstat" id="sentstat"></p>
-      <ul class="mail" id="sent"><li class="empty">読みに行っている…</li></ul>
+    <section class="panel" id="dama-panel" hidden>
+      <h2>出せる弾（校了済み・まだ台帳に無い）</h2>
+      <p class="note" style="margin:0 0 10px">
+        決裁は済んでいる。あとは<b>編集長が自分の手で貼るだけ</b>。
+        貼って記録係が数字を拾えば、ここから自動で消える。
+      </p>
+      <ul class="drafts" id="dama"></ul>
     </section>
 
-    <section class="panel">
-      <h2>係からの返事</h2>
+    <details class="panel" id="done-panel" hidden>
+      <summary>さっき片づけた分（足取り）<em id="donen"></em></summary>
+      <ul class="box" id="done"></ul>
+    </details>
+
+    <!-- 係あてに手紙を出す口は廃止した（v17）。窓口は決裁箱ひとつ。
+         残すのは返事だけ＝写せなかった理由がここに出るので、消すと行き止まりになる。 -->
+    <details class="panel">
+      <summary>係からの返事<em id="mailn"></em></summary>
+      <p class="note" style="margin:0 0 10px">
+        決裁・取材の答え・在庫の空欄・ネタを、Macがどう写したかの記録。
+        <b>写せなかったときの理由もここに出る。</b>
+      </p>
       <ul class="mail" id="mail"><li class="empty">読みに行っている…</li></ul>
-    </section>
+    </details>
+
+    <details class="panel">
+      <summary>決裁が原稿に届くまで</summary>
+      <div data-howto></div>
+    </details>
   </section>
 
   <!-- ============ 台帳 ============ -->
@@ -124,34 +167,6 @@
     <ul class="ltable" id="ltable"></ul>
     <button id="more" class="more" hidden>もっと見る</button>
     <p class="note">views未取得の行は順位づけに使わない。判定は views と いいね率の2軸だけ。<br>型は人が読んで決めたものだけ出す。それ以外は「未分類」。機械の自動判定は当てにならないので画面に出さない。</p>
-  </section>
-
-  <!-- ============ 決裁 ============ -->
-  <section id="view-kessai" class="view" hidden>
-    <section class="panel">
-      <h2>取材（採掘係からの質問）</h2>
-      <p class="note" style="margin:0 0 10px">
-        この会社の在庫は、あおむしが答えないと増えない。
-        <b>1問答えるとN-在庫が1本増える。</b>答えは一字も直さずに在庫へ写る。<br>
-        思い出せない・答えたくない質問は飛ばしていい。ここでもThreadsには何も出ない。
-      </p>
-      <ul class="shuzai" id="shuzai"><li class="empty">読みに行っている…</li></ul>
-    </section>
-
-    <section class="panel">
-      <h2>決裁（校了・差し戻し）</h2>
-      <p class="note" style="margin:0 0 10px">
-        校了にしても、Threadsには何も出ない（憲法4条）。出すのは編集長が自分で貼ったときだけ。
-        校了＝「これは貼っていい」という記録。本文はここからコピーできる。<br>
-        <b>押した瞬間に札が変わる。Macが取りに来るまでは取り消せる。</b>
-      </p>
-      <ul class="drafts" id="drafts"><li class="empty">読みに行っている…</li></ul>
-    </section>
-
-    <section class="panel">
-      <h2>決裁が原稿に届くまで</h2>
-      <div data-howto></div>
-    </section>
   </section>
 
   <!-- ============ 設定 ============ -->
@@ -189,9 +204,10 @@
     </section>
 
     <section class="panel">
-      <h2>知らせ</h2>
+      <h2>朝の知らせ</h2>
       <p class="note" style="margin:0 0 10px">
-        係が返事を書いたときだけ、この端末を突く。通知に会社の数字は載せない（誰から・何について、だけ）。
+        <b>毎朝の点呼が終わったとき</b>と、係が返事を書いたときだけ、この端末を突く。
+        通知に会社の数字は載せない（誰から・何件、だけ）。
         <b>iPhoneはホーム画面に追加したアプリから開いたときしか受け取れない。</b>
       </p>
       <p class="note keystate" id="s-shirase"></p>
@@ -204,12 +220,11 @@
 
 <nav class="tabs">
   <button data-tab="factory" class="on"><b>工</b><span>工場</span></button>
-  <button data-tab="mail"><b>便</b><span>社内便</span><i class="dot" id="maildot" hidden></i></button>
-  <button data-tab="kessai"><b>決</b><span>決裁</span><i class="dot" id="kesdot" hidden></i></button>
+  <button data-tab="kessai"><b>決</b><span>決裁</span><i class="badge" id="kesdot" hidden></i></button>
   <button data-tab="ledger"><b>帳</b><span>台帳</span></button>
 </nav>
 
 <script src="config.js"></script>
-<script src="app.js?v16"></script>
+<script src="app.js?v17"></script>
 </body>
 </html>

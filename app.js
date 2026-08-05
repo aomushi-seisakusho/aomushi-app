@@ -1,6 +1,6 @@
 /* あおむし製作所 PWA
    非公開リポジトリ（金庫）から state.json / factory.svg / ledger.json を読んで表示する。
-   第2期：係あての手紙を金庫の inbox/ に置けるようになった。
+   第6期：窓口は決裁箱ひとつ（係あてに手紙を出す口＝社内便は廃止した）。
    置くのは金庫まで。Threadsへの送信も返信も、ここからは絶対にしない（憲法4条）。 */
 'use strict';
 
@@ -9,17 +9,20 @@ const LS = {
   owner: 'aomushi.owner',
   repo:  'aomushi.repo',
   state: 'aomushi.cache.state',
-  pend:  'aomushi.sent.pending',   // 金庫に置いたが、まだ state.json に載っていない手紙
-  draft: 'aomushi.mail.draft',     // 書きかけ。アプリが裏に回っても消えないように
   kes:   'aomushi.kessai.pending', // 決裁票は置いたが、まだ原稿に印が付いていない分
   ansd:  'aomushi.shuzai.draft',   // 取材の答えの書きかけ（質問ごと）
   shu:   'aomushi.shuzai.pending', // 答えは置いたが、まだ在庫に入っていない分
+  yok:   'aomushi.yoken.pending',  // 片づけた要件（まだMacが台帳に写していない分）
+  umed:  'aomushi.ume.draft',      // 在庫の空欄の書きかけ（在庫×欄ごと）
+  ume:   'aomushi.ume.pending',    // 空欄に置いたが、まだ在庫に入っていない分
+  neta:  'aomushi.neta.pending',   // 放ったネタ（まだ在庫に積まれていない分）
+  netad: 'aomushi.neta.draft',     // ネタの書きかけ
   push:  'aomushi.push.id',        // 知らせの宛先ID（金庫の push/<id>.json と対）
 };
 
 // この端末が今どの版を動かしているか。sw.js の V と必ず同じ数字にする。
 // 「新しくしたのに出ない」を推測で潰さないための、唯一の手がかり
-const APPV = 'v16';
+const APPV = 'v17';
 
 const DEF = window.AOMUSHI_CONFIG || {};
 const cfg = () => ({
@@ -97,7 +100,7 @@ async function pull(path) {
   return res.text();
 }
 
-/* 金庫に1ファイル置く。置けるのは inbox/ の手紙だけに絞ってある。 */
+/* 金庫に1ファイル置く。置けるのは inbox/ の札だけに絞ってある。 */
 async function push(path, text, message) {
   const c = cfg();
   if (!c.token || !c.owner || !c.repo) throw new NoKey('鍵がまだ入っていない');
@@ -306,18 +309,18 @@ function traceLine(t) {
 }
 const statChip = (t) => `<span class="stat ${t.k}">${esc(t.label)}</span>`;
 
-/* 仕組みの説明。社内便と決裁の両方に同じものを出す（憲法4条の担保でもある） */
+/* 仕組みの説明。決裁箱で押した札が、どこを通ってMacに届くか（憲法4条の担保でもある） */
 const HOWTO = `
 <div class="flow">
   <div class="fstep"><b>1</b><span class="stat sent">送った（未読）</span>
-    <p>非公開の金庫に置いただけ。<b>まだ誰も読んでいない。</b></p></div>
+    <p>非公開の金庫に置いただけ。<b>まだ何も写されていない。</b>ここまでなら取り消せる。</p></div>
   <div class="fstep"><b>2</b><span class="stat recv">届いた</span>
-    <p>Macが5分おきに金庫を見に来て、取り込んだ。係が読んでいる最中（返事まで数分）。</p></div>
+    <p>Macが5分おきに金庫を見に来て、取り込んだ。原稿や在庫に写している最中。</p></div>
   <div class="fstep"><b>3</b><span class="stat read">係が読んだ</span>
-    <p>返事が金庫に戻った。「係からの返事」に出る。</p></div>
+    <p>写し終わって、結果が金庫に戻った。「係からの返事」に出る。</p></div>
 </div>
-<p class="hnote"><b>Macが動くまで、係は読まない。</b>
-Macが閉じている・止まっている間、手紙は金庫でただ待つ。何時間でも待つ。<br>
+<p class="hnote"><b>Macが動くまで、何も写らない。</b>
+Macが閉じている・止まっている間、押した札は金庫でただ待つ。何時間でも待つ。<br>
 そしてどこまで進んでも<b>Threadsには何も出ない</b>（憲法4条）。出すのは編集長が自分で貼ったときだけ。</p>
 <p class="hbeat" data-beat></p>`;
 
@@ -335,7 +338,7 @@ function paintBeat() {
 
 /* ================= 画面の切り替え ================= */
 
-const VIEWS = ['factory', 'mail', 'kessai', 'ledger', 'setup'];
+const VIEWS = ['factory', 'kessai', 'ledger', 'setup'];
 let ledgerLoaded = false;
 
 function show(name) {
@@ -347,6 +350,26 @@ function show(name) {
 }
 
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
+
+/* 「今日やること」から、その札そのものへ飛ぶ。読ませたら、押せる場所まで連れて行く */
+function goto(target) {
+  show('kessai');
+  const sel = { dama: '#dama-panel', drafts: '.k-draft', shuzai: '.k-shuzai',
+                holes: '.k-hole', yoken: '.k-yoken' }[target] || '#box';
+  setTimeout(() => {
+    const el = document.querySelector(sel) || $('#box');
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); }
+  }, 60);
+}
+on('#today', 'click', (ev) => {
+  const li = ev.target.closest('[data-go]');
+  if (li) goto(li.dataset.go);
+});
+on('#today-mini', 'click', (ev) => {
+  const li = ev.target.closest('[data-go]');
+  if (li) goto(li.dataset.go);
+});
+$$('[data-go="kessai"]').forEach((b) => b.addEventListener('click', () => show('kessai')));
 
 /* 端末に何が入っているかを言葉で出す。鍵そのものは出さず、頭と長さだけ。
    「入れたはずなのに」を推測で潰さないための、唯一の手がかり */
@@ -420,7 +443,9 @@ function renderState(st) {
     chip('取材地図 E-', c.chizu),
     chip('台帳', `${nf(c.ledger)}本`),
     chip('実測', `${nf(c.measured)}本`),
-    chip('決裁', `${(st.inbox_tasks || []).length}件`, (st.inbox_tasks || []).length > 0),
+    // 決裁箱の未処理は、この画面でいちばん大事な数。宿題（機械が見ている条件）とは別に出す
+    chip('決裁箱', `未処理${nf(st.machi || 0)}件`, (st.machi || 0) > 0),
+    chip('宿題', `${(st.inbox_tasks || []).length}件`),
     chip('記録係', c.token ? '稼働' : 'トークン待ち', !c.token),
   ].join('');
 
@@ -431,7 +456,9 @@ function renderState(st) {
   const tasks = st.inbox_tasks || [];
   $('#inboxtasks').innerHTML = tasks.length
     ? tasks.map((t) => `<li>${esc(t)}</li>`).join('')
-    : '<li class="empty">決裁待ちは無い。</li>';
+    : '<li class="empty">宿題は無い。</li>';
+
+  renderToday(st);
 
   $('#roster').innerHTML = (st.roster || []).map((a) => `
     <li><b><i class="lampdot ${a.status === 'run' ? 'lg' : 'ly'}"></i>${esc(a.nm)}
@@ -443,8 +470,7 @@ function renderState(st) {
     : '<li class="empty">まだ動きが無い。</li>';
 
   renderMail(st);
-  renderShuzai(st);
-  renderKessai(st);
+  renderBox(st);
 
   const g = st.generated_at ? new Date(st.generated_at) : null;
   $('#gen').textContent = g
@@ -509,152 +535,488 @@ function inLine(m) {
     </li>`;
 }
 
-/* 編集長が送った分（出し）。1通ごとに、今どこまで進んだかを必ず出す */
-function outLine(m) {
-  const t = m.flight ? { k: 'sending', label: '送っている…' } : trace(m.id, m.ts);
-  const rep = t.rep;
-  return `<li class="s-${t.k}">
-    <div class="mh"><span class="who">編集長 → ${esc(YAKU[m.to] || m.to || '')}</span>
-      ${m.subject ? `<span>${esc(m.subject)}</span>` : ''}
-      <span class="mt">${esc(hhmm(m.ts))}</span></div>
-    <div class="srow">${statChip(t)}<span class="sline">${esc(traceLine(t))}</span></div>
-    <div class="mb">${esc(m.body || '')}</div>
-    ${rep ? `<button class="jump" data-jump="re-${esc(rep.id)}">${
-      t.k === 'ng' ? '失敗の中身を見る' : '返事を読む'}</button>` : ''}
-    </li>`;
-}
-
 function renderMail(st) {
-  const mail = st.mail || [], sent = st.sent || [];
-  // 金庫には置いたが state.json はまだ刷り直されていない分を、上に混ぜて出す。
-  // 送った手紙は消さない。ここから消えるのは、金庫側の一覧に出たときだけ
-  const known = new Set(sent.map((m) => m.id));
-  const pend = loadPending().filter((m) => !known.has(m.id));
-  savePending(pend);
-  const out = pend.concat(sent)
-    .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
-  if (FLIGHT.letter) out.unshift({ ...FLIGHT.letter, flight: true });
-
+  const mail = st.mail || [];
   $('#mail').innerHTML = mail.length ? mail.map(inLine).join('')
-    : '<li class="empty">返事はまだ無い。手紙を出せば、次にMacが動いたときに係が読む。</li>';
-  $('#sent').innerHTML = out.length ? out.map(outLine).join('')
-    : '<li class="empty">まだ何も送っていない。</li>';
-
-  const unread = out.filter((m) => !m.flight && trace(m.id, m.ts).k === 'sent').length;
-  $('#sentstat').innerHTML = out.length
-    ? `送った ${out.length}通　／　まだ読まれていない <b class="${unread ? 'amb' : ''}">${unread}通</b>`
-    : '';
-  $('#maildot').hidden = mail.length === 0;
+    : '<li class="empty">まだ何も写していない。決裁箱の札を押せば、Macが写した結果がここに出る。</li>';
+  const mn = $('#mailn');
+  if (mn) mn.textContent = mail.length ? `　${mail.length}通` : '';
   paintBeat();
 }
 
-// 返事へ飛ぶ。長い一覧で「どれの返事か」を目で探させない
-on('#sent', 'click', (ev) => {
-  const b = ev.target.closest('[data-jump]');
-  if (!b) return;
-  const el = document.getElementById(b.dataset.jump);
-  if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); }
-});
+/* ================= 決裁箱（会社の唯一の窓口） =================
+   係の要件・取材の質問・下書きの決裁・在庫の空欄。**全部この1つの箱に並ぶ。**
+   押した瞬間に箱から消える。足取りは「さっき片づけた分」に残る（黙って消さない）。
+   ここでもThreadsには何も出ない。出すのは編集長が自分で貼ったときだけ（憲法4条）。 */
 
-/* ================= 決裁（第3期・校了ボタン） =================
-   校了しても Threads には何も出ない。出すのは編集長が自分で貼ったときだけ（憲法4条）。
-   ここが書くのは金庫の inbox/ に置く決裁票1枚。原稿に印をつけるのはMac側の配達係。 */
+const jparse = (s, fb) => { try { return JSON.parse(s) ?? fb; } catch (_) { return fb; } };
+const jobj = (k) => { const v = jparse(localStorage.getItem(LS[k]), {});
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; };
+const jarr = (k) => { const v = jparse(localStorage.getItem(LS[k]), []);
+  return Array.isArray(v) ? v : []; };
 
-const loadKes = () => {
-  const v = jparse(localStorage.getItem(LS.kes), {});
-  return (v && typeof v === 'object') ? v : {};
-};
-const saveKes = (o) => put(LS.kes, JSON.stringify(o));
+let ST = null;   // 最後に読めた会社の姿。送った直後に画面だけ描き直すのに使う
 
-const ST_CLS = { '校了': 'ok', '再校': 'ng', '初校': '' };
+/* 金庫に置いたが、まだMacが写していない札。端末の中だけの覚え書き */
+const loadKes  = () => jobj('kes');
+const saveKes  = (o) => put(LS.kes, JSON.stringify(o));
+const loadYok  = () => jobj('yok');
+const saveYok  = (o) => put(LS.yok, JSON.stringify(o));
+const loadUmeP = () => jobj('ume');
+const saveUmeP = (o) => put(LS.ume, JSON.stringify(o));
+const loadShu  = () => jarr('shu');
+const saveShu  = (a) => put(LS.shu, JSON.stringify(a.slice(0, 30)));
+const loadNeta = () => jarr('neta');
+const saveNeta = (a) => put(LS.neta, JSON.stringify(a.slice(0, 20)));
+/* 書きかけ。アプリが裏に回っても、通信に失敗しても消えない */
+const loadAns  = () => jobj('ansd');
+const saveAns  = (o) => put(LS.ansd, JSON.stringify(o));
+const loadUmeD = () => jobj('umed');
+const saveUmeD = (o) => put(LS.umed, JSON.stringify(o));
 
 /* 押した瞬間に見た目を変えるための、通信中だけの覚え書き。
    金庫に届く前でも札が変わっていないと、押したのかどうか本人に分からない */
-const FLIGHT = { letter: null, kes: {}, shu: {} };
-let REASON = '';   // 差し戻しの理由を書いている原稿。書いている最中は画面を描き直さない
+const FLIGHT = { kes: {}, shu: {}, yok: {}, ume: {}, neta: false };
+const flying = () => Object.keys(FLIGHT.kes).length + Object.keys(FLIGHT.shu).length
+                   + Object.keys(FLIGHT.yok).length + Object.keys(FLIGHT.ume).length;
+/* 書いている最中・理由を書いている最中は、裏の自動更新で画面を組み直さない */
+const HOLD = { typing: '', reason: '' };
 
-function renderKessai(st, force) {
-  // 通信中・理由を書いている最中に、裏の自動更新で画面を消さない
-  if (!force && (REASON || Object.keys(FLIGHT.kes).length)) return;
-  const ds = st.drafts || [];
-  const pend = loadKes();
-  // Mac側が印を付け終わった原稿は、待ち札を消す
-  ds.forEach((d) => { if (pend[d.n] && pend[d.n].want === d.st) delete pend[d.n]; });
-  saveKes(pend);
+const YAKU2 = { boss: '編集長', kiroku: '記録係', saikutsu: '採掘係', shippitsu: '執筆係',
+                kenmon: '検問係', teisatsu: '偵察係', haitatsu: '配達係', zensha: '会社' };
+const ST_CLS = { '校了': 'ok', '再校': 'ng', '初校': '' };
 
-  $('#drafts').innerHTML = ds.length ? ds.map((d) => {
-    const f = FLIGHT.kes[d.n];
-    const p = pend[d.n];
-    const st_ = (f && f.want) || (p && p.want) || d.st;
-    const t = f ? { k: 'sending', label: '送っている…' } : (p ? trace(p.id, p.ts) : null);
-    return `<li class="${t ? 's-' + t.k : ''}" data-li="${esc(d.n)}">
-      <div class="dh"><b>${esc(d.n)}</b>
-        <span class="badge ${ST_CLS[st_] || ''}">${esc(st_)}</span></div>
-      ${t ? `<div class="srow">${statChip(t)}<span class="sline">${esc(
-              t.k === 'read' ? `${hhmm(t.ts)} にMacが原稿に印を付けた（${ago(t.ts)}）`
-                             : traceLine(t))}</span></div>` : ''}
-      ${p && p.note ? `<div class="pnote">差し戻しの理由：${esc(p.note)}</div>` : ''}
-      <div class="dt">${esc(d.body || d.h || '')}</div>
-      ${d.reason ? `<div class="drea">検問：${esc(d.reason)}</div>` : ''}
-      ${t ? kesTail(d.n, t) : `
+/* 札の名札は「種類::番号」。カードの data-k / data-d はこの形で持ち、押されたときに割る。
+   ここを空文字で割ると1文字ずつに散る（実際にそれで『取り消す』が黙って効かなくなった）。 */
+const SEP = '::';
+const umeKey = (n, f) => `${n}${SEP}${f}`;
+const cardEl = (k) => Array.from(document.querySelectorAll('[data-k]'))
+  .find((e) => e.dataset.k === k) || null;
+const inCard = (k, sel) => { const c = cardEl(k); return c && c.querySelector(sel); };
+function say(k, cls, text) {
+  const el = inCard(k, '.cmsg');
+  if (el) { el.className = 'note cmsg ' + (cls || ''); el.textContent = text || ''; }
+}
+const failCard = (k, e, retry, label) => failInto(inCard(k, '.failbox'), e, retry, label);
+const clearCard = (k) => clearFail(inCard(k, '.failbox'));
+
+/* 置いた札が、いま金庫のどこに居るか。失敗している札は「片づいていない」＝箱に戻す */
+function recTrace(rec) {
+  if (!rec || !rec.id) return null;
+  return trace(rec.id, rec.ts);
+}
+const settled = (rec) => { const t = recTrace(rec); return !!t && t.k !== 'ng'; };
+
+/* ================= 今日やること（1〜3件） ================= */
+
+function renderToday(st, items) {
+  /* 「今日やること」は金庫が刷った時点の話。押して片づけた分をそのまま出すと、
+     押したのに残っている＝読まなくなる。**箱から消えた仕事は、その場で消す。** */
+  const have = (kind) => (items || []).some((x) => x.kind === kind);
+  const dama = (st.drafts || []).some((d) => d.st === '校了' && !d.posted);
+  const alive = (t) => ({ dama, drafts: have('draft'), shuzai: have('shuzai'),
+                          holes: have('hole'), yoken: have('yoken') })[t.go] !== false;
+  const src = (st.today || []).filter((t) => !items || alive(t));
+  const html = src.length
+    ? src.map((t, i) => `<li data-go="${esc(t.go || '')}"><b>${i + 1}</b>
+        <span>${esc(t.t)}</span></li>`).join('')
+    : (items && (st.today || []).length
+        ? '<li class="empty">今日やることは片づけた。次の朝の点呼まで、箱は静かになる。</li>'
+        : '<li class="empty">今日やることは無い。箱は空だ。</li>');
+  ['#today', '#today-mini'].forEach((sel) => { const el = $(sel); if (el) el.innerHTML = html; });
+  const g = st.gap || {};
+  const gn = $('#gapnote');
+  if (gn) gn.textContent = g.days == null ? ''
+    : `前回の投稿は ${g.date}「${g.head}」（${nf(g.views)}views／${(g.rate || 0).toFixed(2)}%）。`
+      + `あれから${g.days}日。`;
+}
+
+/* ================= 箱の中身を組む ================= */
+
+function boxItems(st) {
+  const out = [];
+  const kes = loadKes(), yok = loadYok(), ume = loadUmeP();
+  const shuL = {};
+  loadShu().forEach((l) => { if (l.q) shuL[l.q] = l; });
+  (st.shuzai_sent || []).forEach((l) => { if (l.q) shuL[l.q] = l; });
+
+  // ---- 下書きの決裁（初校だけ。校了・再校は片づいた分）----
+  (st.drafts || []).filter((d) => d.st === '初校').forEach((d) => {
+    const f = FLIGHT.kes[d.n], p = kes[d.n];
+    if (!f && settled(p)) return;                       // 押した分は箱から消える
+    out.push({ kind: 'draft', k: `kes::${d.n}`, prio: 1, who: 'shippitsu',
+               tag: '決裁', d, f, p });
+  });
+
+  // ---- 取材（未回答だけ）----
+  (st.shuzai || []).filter((q) => q.st === '未回答').forEach((q) => {
+    const f = FLIGHT.shu[q.id], l = shuL[q.id];
+    if (!f && settled(l)) return;
+    out.push({ kind: 'shuzai', k: `shu::${q.id}`, prio: 2, who: 'saikutsu',
+               tag: '取材', q, f, l });
+  });
+
+  // ---- 係の要件 ----
+  (st.yoken || []).forEach((y) => {
+    const f = FLIGHT.yok[y.id], p = yok[y.id];
+    if (!f && settled(p)) return;
+    out.push({ kind: 'yoken', k: `yok::${y.id}`, prio: y.prio || 3,
+               who: y.from, tag: y.tag || '要件', y, f, p });
+  });
+
+  // ---- 在庫の空欄（埋めれば弾になる）----
+  (st.holes || []).forEach((h) => {
+    const fields = (h.missing || []).filter((fl) => {
+      const key = umeKey(h.n, fl);
+      return FLIGHT.ume[key] || !settled(ume[key]);
+    });
+    if (!fields.length) return;
+    // 空欄は「埋めれば弾になる」仕事。決める・答える・知る の後に置く
+    out.push({ kind: 'hole', k: `hole::${h.n}`, prio: 4, who: 'shippitsu',
+               tag: '在庫の空欄', h, fields });
+  });
+
+  // 読む順：決める(1) → 答える(2) → 知る(3) → 埋める(4) → 検討する(5)
+  return out.sort((a, b) => (a.prio - b.prio) || a.k.localeCompare(b.k));
+}
+
+const chead = (it, right) => `<div class="ch"><span class="who">${esc(YAKU2[it.who] || it.who || '係')}</span>
+  <span class="tg">${esc(it.tag)}</span>${right || ''}</div>`;
+
+const traceRow = (t, line) => t
+  ? `<div class="srow">${statChip(t)}<span class="sline">${esc(line)}</span></div>` : '';
+
+/* ---- 要件（記録係・偵察係・会社…）---- */
+function cardYoken(it) {
+  const y = it.y;
+  const t = it.f ? { k: 'sending', label: '送っている…' } : (it.p ? recTrace(it.p) : null);
+  return chead(it, `<span class="pr">prio${esc(y.prio)}</span>`)
+    + `<div class="ct">${esc(y.title)}</div>`
+    + `<div class="cb">${mdlite(y.body)}</div>`
+    + traceRow(t, t ? (t.k === 'ng' ? '片づけられなかった。理由は下の返事に出ている' : traceLine(t)) : '')
+    + (HOLD.reason === it.k ? `
+      <div class="rbox">
+        <label class="fld"><span>却下する理由（そのまま係に渡る）</span>
+          <textarea class="r-note" rows="3" placeholder="例：この熱には在庫を使わない"></textarea></label>
+        <div class="btnrow">
+          <button class="btn a-yok-send">この理由で却下する</button>
+          <button class="btn ghost a-cancel">やめる</button>
+        </div>
+      </div>`
+      : (t && t.k !== 'ng' ? '' : `
       <div class="btnrow">
-        <button class="btn kes-ok" data-n="${esc(d.n)}">校了にする</button>
-        <button class="btn ghost kes-ng" data-n="${esc(d.n)}">差し戻す</button>
-        <button class="btn ghost kes-cp" data-n="${esc(d.n)}">本文をコピー</button>
-      </div>`}
-      ${REASON === d.n ? `
+        <button class="btn a-yok-ack">了解（片づける）</button>
+        <button class="btn ghost a-yok-ng">却下する</button>
+      </div>`));
+}
+
+/* ---- 取材の質問（答え1つ＝N-在庫1本）---- */
+function cardShuzai(it) {
+  const q = it.q;
+  const t = it.f ? { k: 'sending', label: '送っている…' } : (it.l ? recTrace(it.l) : null);
+  const stuck = !!(t && t.k === 'ng');
+  const kaku = !t || stuck;
+  const moto = loadAns()[q.id] || (stuck && it.l ? it.l.body : '') || '';
+  const meta = [q.e && q.e !== '（指定なし）' ? `隣：${q.e}` : '',
+                q.nerai && q.nerai !== '（無し）' ? `狙い：${q.nerai}` : ''].filter(Boolean);
+  return chead(it, `<span class="pr">${esc(q.id)}</span>`)
+    + `<div class="qt">${esc(q.q)}</div>`
+    + (meta.length ? `<div class="qm">${esc(meta.join('　／　'))}</div>` : '')
+    + traceRow(t && t.k === 'ng' ? { ...t, label: '在庫にできなかった' } : t,
+        t ? (t.k === 'sending' ? '金庫に置いている…' : shuLine(t, q.n)) : '')
+    + (kaku ? `
+      <label class="fld"><span>答え（このまま在庫の本文になる。話し言葉でいい）</span>
+        <textarea class="a-note" rows="4"
+          placeholder="そのとき誰が何て言ったか、そのままの言葉で。">${esc(moto)}</textarea></label>
+      <div class="btnrow">
+        <button class="btn a-shu-send">${stuck ? 'もう一度、在庫にする' : 'この答えを在庫にする'}</button>
+        <button class="btn ghost a-shu-clear">消す</button>
+      </div>` : '')
+    ;   // 「取り消す」は箱ではなく「さっき片づけた分」に出す（置けた札は箱から消えるから）
+}
+
+/* ---- 下書きの決裁 ---- */
+function cardDraft(it) {
+  const d = it.d;
+  const st_ = (it.f && it.f.want) || (it.p && it.p.want) || d.st;
+  const t = it.f ? { k: 'sending', label: '送っている…' } : (it.p ? recTrace(it.p) : null);
+  return chead(it, `<span class="pr">${esc(d.n)}</span>`)
+    + `<div class="ct">下書きの決裁：${esc(d.h || '')}</div>`
+    + `<span class="badge ${ST_CLS[st_] || ''}">${esc(st_)}</span>`
+    + `<div class="dt">${esc(d.body || d.h || '')}</div>`
+    + (d.reason ? `<div class="drea">検問：${esc(d.reason)}</div>` : '')
+    + traceRow(t, t ? (t.k === 'ng' ? '原稿に印を付けられなかった' : traceLine(t)) : '')
+    + (HOLD.reason === it.k ? `
       <div class="rbox">
         <label class="fld"><span>差し戻す理由（そのまま執筆係に渡る）</span>
           <textarea class="r-note" rows="3"
             placeholder="例：E-由来＝焼き直し。N-在庫から書き直し"></textarea></label>
         <div class="btnrow">
-          <button class="btn kes-send" data-n="${esc(d.n)}">この理由で差し戻す</button>
-          <button class="btn ghost kes-cancel" data-n="${esc(d.n)}">やめる</button>
+          <button class="btn a-kes-send">この理由で差し戻す</button>
+          <button class="btn ghost a-cancel">やめる</button>
         </div>
-      </div>` : ''}
-      <div class="failbox" id="kf-${esc(d.n)}" hidden></div>
-      <p class="note kes-msg" id="km-${esc(d.n)}"></p>
-    </li>`;
-  }).join('') : '<li class="empty">下書きが無い。執筆係が書けば、ここに出る。</li>';
+      </div>`
+      : (t ? `<div class="btnrow">
+          <button class="btn ghost a-cp">本文をコピー</button></div>`
+        : `<div class="btnrow">
+          <button class="btn a-kes-ok">校了にする</button>
+          <button class="btn ghost a-kes-ng">差し戻す</button>
+          <button class="btn ghost a-cp">本文をコピー</button>
+        </div>`));
+}
 
-  if (REASON) {
-    const ta = document.querySelector(`[data-li="${CSS.escape(REASON)}"] .r-note`);
+/* ---- 在庫の空欄（ここを埋めた瞬間に弾になる）---- */
+function cardHole(it) {
+  const h = it.h, dr = loadUmeD(), pend = loadUmeP();
+  const rows = it.fields.map((f) => {
+    const key = umeKey(h.n, f);
+    const fl = FLIGHT.ume[key], p = pend[key];
+    const t = fl ? { k: 'sending', label: '送っている…' } : (p ? recTrace(p) : null);
+    const stuck = !!(t && t.k === 'ng');
+    const val = dr[key] || (stuck && p ? p.body : '') || '';
+    return `<div class="ufld" data-f="${esc(f)}">
+      <label class="fld"><span>${esc(f)}</span>
+        <textarea class="u-note" rows="2"
+          placeholder="そのときの言葉のまま。思い出せないなら空のままでいい。">${esc(val)}</textarea></label>
+      ${traceRow(t && t.k === 'ng' ? { ...t, label: '入れられなかった' } : t,
+          t ? (t.k === 'sending' ? '金庫に置いている…'
+             : t.k === 'read' ? `${hhmm(t.ts)} に在庫へ入った（${ago(t.ts)}）` : traceLine(t)) : '')}
+      ${(!t || stuck) ? `<div class="btnrow">
+        <button class="btn a-ume-send">${stuck ? 'もう一度、入れる' : 'この言葉で埋める'}</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+  return chead(it, `<span class="pr">${esc(h.n)}</span>`)
+    + `<div class="ct">在庫の空欄：${esc(it.fields.join('／'))}</div>`
+    + `<div class="cb clamp"><p>${esc(h.deki || '')}</p></div>`
+    + (h.toi ? `<div class="qm clamp">${esc(h.toi)}</div>` : '')
+    + `<p class="note">埋めた言葉は<b>一字も直さず</b>在庫に写る。想像で埋めない（憲法3条）。</p>`
+    + rows;
+}
+
+const CARD = { yoken: cardYoken, shuzai: cardShuzai, draft: cardDraft, hole: cardHole };
+
+
+/* Macが写し終えた札は、端末の覚え書きから落とす。
+   落とさないと「さっき片づけた分」が永久に残り、箱の判定も古い札を見続ける。
+   **金庫が読めていないとき（stが空）は何も落とさない。** 消し過ぎる方が害が大きい。 */
+function sweep(st) {
+  if (!st || !st.generated_at) return;
+  if (st.drafts) {
+    const p = loadKes(), by = {};
+    st.drafts.forEach((d) => { by[d.n] = d.st; });
+    const del = Object.keys(p).filter((n) => by[n] === undefined || by[n] === p[n].want);
+    if (del.length) { del.forEach((n) => delete p[n]); saveKes(p); }
+  }
+  if (st.shuzai) {
+    const by = {};
+    st.shuzai.forEach((q) => { by[q.id] = q.st; });
+    const cur = loadShu(), keep = cur.filter((l) => by[l.q] === '未回答');
+    if (keep.length !== cur.length) saveShu(keep);
+  }
+  if (st.yoken) {
+    const ids = new Set(st.yoken.map((y) => y.id));
+    const p = loadYok();
+    const del = Object.keys(p).filter((y) => !ids.has(y));
+    if (del.length) { del.forEach((y) => delete p[y]); saveYok(p); }
+  }
+  if (st.holes) {
+    const keys = new Set();
+    st.holes.forEach((h) => (h.missing || []).forEach((f) => keys.add(umeKey(h.n, f))));
+    const p = loadUmeP();
+    const del = Object.keys(p).filter((k) => !keys.has(k));
+    if (del.length) { del.forEach((k) => delete p[k]); saveUmeP(p); }
+  }
+  // ネタは金庫側に「済んだ」印が無い。返事が戻って1時間たったら畳む
+  const cur = loadNeta();
+  const keep = cur.filter((l) => {
+    const t = recTrace(l);
+    return !t || t.k !== 'read' || minsSince(l.ts) < 60;
+  });
+  if (keep.length !== cur.length) saveNeta(keep);
+}
+
+function renderBox(st, force) {
+  if (!force && (HOLD.typing || HOLD.reason || flying())) return;
+  sweep(st);
+  const items = boxItems(st);
+  $('#box').innerHTML = items.length ? items.map((it) => {
+    const t = it.f ? { k: 'sending' } : null;
+    return `<li class="card k-${it.kind}${t ? ' s-sending' : ''}" data-k="${esc(it.k)}">
+      ${CARD[it.kind](it)}
+      <div class="failbox" hidden></div>
+      <p class="note cmsg"></p>
+    </li>`;
+  }).join('')
+    : (st.today
+        ? '<li class="empty">箱は空だ。次の朝の点呼で、係が要件を積む。</li>'
+        : (st.generated_at
+            ? `<li class="empty">金庫の材料に決裁箱の欄がまだ無い（Mac側が古い）。<br>
+               Macで <code>python3 state.py</code> を走らせれば、次の配達でここに出る。</li>`
+            : '<li class="empty">読みに行っている…</li>'));
+
+  $('#boxn').textContent = items.length ? `　未処理 ${items.length}件` : '';
+  renderToday(st, items);       // 箱の中身に合わせて「今日やること」を間引く
+  if (HOLD.reason) {
+    const ta = inCard(HOLD.reason, '.r-note');
     if (ta) ta.focus();
   }
-  KES_WAIT = ds.filter((d) => d.st === '初校' || d.st === '再校').length;
+  renderDama(st);
+  renderDone(st);
+  BOX_WAIT = items.length;
   paintKesDot();
   paintBeat();
 }
 
-/* 決裁タブの赤丸。決裁待ちの原稿と、未回答の取材質問の両方で点く。
-   質問に答えないと在庫が増えない＝会社が止まるので、原稿と同じ重さで出す。 */
-let KES_WAIT = 0, SHU_WAIT = 0;
-function paintKesDot() { $('#kesdot').hidden = (KES_WAIT + SHU_WAIT) === 0; }
-
-/* 決裁を出したあとの足元。取り消せるのは「まだMacが取りに来ていない」間だけ。
-   取り込まれたあとに「取り消せます」と出すのは嘘になる。 */
-function kesTail(n, t) {
-  const cp = `<button class="btn ghost kes-cp" data-n="${esc(n)}">本文をコピー</button>`;
-  if (t.k === 'sending') return '';
-  if (t.k === 'sent') return `<div class="btnrow">
-      <button class="btn ghost kes-undo" data-n="${esc(n)}">取り消す（まだ間に合う）</button>
-      ${cp}</div>`;
-  if (t.k === 'recv') return `<p class="note">Macがもう取り込んだ。これは取り消せない。
-      変えるなら、印が付いたあとにもう一度 決裁する。</p><div class="btnrow">${cp}</div>`;
-  return `<div class="btnrow">${cp}</div>`;
+/* タブの赤い数字。押されていない札の数をそのまま出す。
+   質問に答えないと在庫が増えない＝会社が止まるので、原稿と同じ重さで数える。 */
+let BOX_WAIT = 0;
+function paintKesDot() {
+  const el = $('#kesdot');
+  if (!el) return;
+  el.hidden = BOX_WAIT === 0;
+  el.textContent = BOX_WAIT > 99 ? '99+' : String(BOX_WAIT);
 }
 
+/* ================= 出せる弾（校了済み・まだ台帳に無い） ================= */
+
+function renderDama(st) {
+  const ds = (st.drafts || []).filter((d) => d.st === '校了' && !d.posted);
+  $('#dama-panel').hidden = ds.length === 0;
+  $('#dama').innerHTML = ds.map((d) => `
+    <li data-k="dama::${esc(d.n)}">
+      <div class="dh"><b>${esc(d.n)}</b><span class="badge ok">校了</span></div>
+      <div class="dt">${esc(d.body || d.h || '')}</div>
+      <div class="btnrow"><button class="btn a-cp">本文をコピー</button></div>
+      <p class="note cmsg"></p>
+    </li>`).join('');
+}
+
+/* ================= さっき片づけた分（黙って消さないための足取り） ================= */
+
+function doneItems(st) {
+  const out = [];
+  const push = (o) => { if (o.rec && o.rec.id) out.push(o); };
+  const kes = loadKes(), yok = loadYok(), ume = loadUmeP();
+  Object.keys(kes).forEach((n) =>
+    push({ kind: 'draft', key: n, label: `下書き『${n}』を${kes[n].want}にした`, rec: kes[n] }));
+  Object.keys(yok).forEach((y) =>
+    push({ kind: 'yoken', key: y, label: `要件 ${y} を${yok[y].action === 'ack' ? '了解' : '却下'}にした`,
+           rec: yok[y] }));
+  Object.keys(ume).forEach((k) => {
+    const [n, f] = k.split(SEP);
+    push({ kind: 'ume', key: k, label: `${n} の「${f}」を埋めた`, rec: ume[k] });
+  });
+  loadShu().forEach((l) =>
+    push({ kind: 'shuzai', key: l.q, label: `取材 ${l.q} に答えた`, rec: l }));
+  loadNeta().forEach((l) =>
+    push({ kind: 'neta', key: l.id, label: `ネタを放った：${(l.body || '').slice(0, 24)}`, rec: l }));
+  return out.sort((a, b) => String(b.rec.ts || '').localeCompare(String(a.rec.ts || '')))
+            .slice(0, 12);
+}
+
+function renderDone(st) {
+  const items = doneItems(st);
+  $('#done-panel').hidden = items.length === 0;
+  $('#donen').textContent = items.length ? `　${items.length}件` : '';
+  $('#done').innerHTML = items.map((o) => {
+    const t = recTrace(o.rec) || { k: 'sent', label: '送った（未読）', ts: o.rec.ts };
+    const rep = t.rep;
+    return `<li class="card done s-${t.k}" data-d="${esc(o.kind)}::${esc(o.key)}">
+      <div class="ch"><span class="who">編集長</span><span class="tg">${esc(o.label)}</span></div>
+      ${traceRow(t, traceLine(t))}
+      ${rep ? `<div class="cb">${mdlite(rep.body)}</div>` : ''}
+      ${t.k === 'sent' ? `<div class="btnrow">
+        <button class="btn ghost a-undo">取り消す（まだ間に合う）</button></div>` : ''}
+      ${t.k === 'ng' ? `<div class="btnrow">
+        <button class="btn ghost a-redo">箱に戻してやり直す</button></div>` : ''}
+      <div class="failbox" hidden></div>
+      <p class="note cmsg"></p>
+    </li>`;
+  }).join('');
+}
+
+/* 片づけた札を元に戻す。
+   取り消す＝まだMacが取りに来ていない札を、金庫から消して無かったことにする。
+   やり直す＝写せなかった札を箱に戻す（書いた言葉は欄に戻す。消さない）。
+   **箱から消えた札の取り消しは、ここにしか無い。** 箱のカードにはもう出ない。 */
+function unfile(kind, key) {
+  if (kind === 'draft') { const o = loadKes(); delete o[key]; saveKes(o); }
+  if (kind === 'yoken') { const o = loadYok(); delete o[key]; saveYok(o); }
+  if (kind === 'ume') {
+    const o = loadUmeP(), rec = o[key];
+    if (rec) { const d = loadUmeD(); d[key] = rec.body || ''; saveUmeD(d); }
+    delete o[key]; saveUmeP(o);
+  }
+  if (kind === 'shuzai') {
+    const l = loadShu().find((x) => x.q === key);
+    if (l) { const d = loadAns(); d[key] = l.body || ''; saveAns(d); }
+    saveShu(loadShu().filter((x) => x.q !== key));
+  }
+  if (kind === 'neta') saveNeta(loadNeta().filter((x) => x.id !== key));
+}
+
+function doneRec(kind, key) {
+  if (kind === 'draft') return loadKes()[key];
+  if (kind === 'yoken') return loadYok()[key];
+  if (kind === 'ume') return loadUmeP()[key];
+  if (kind === 'shuzai') return loadShu().find((x) => x.q === key);
+  if (kind === 'neta') return loadNeta().find((x) => x.id === key);
+  return null;
+}
+
+on('#done', 'click', async (ev) => {
+  const b = ev.target.closest('button');
+  const li = ev.target.closest('[data-d]');
+  if (!b || !li) return;
+  const [kind, key] = li.dataset.d.split(SEP);
+  const msg = li.querySelector('.cmsg'), fail = li.querySelector('.failbox');
+  clearFail(fail);
+  if (b.classList.contains('a-redo')) { unfile(kind, key); return renderBox(ST || {}, true); }
+  if (!b.classList.contains('a-undo')) return;
+  const rec = doneRec(kind, key);
+  if (!rec || !rec.id) {
+    if (msg) { msg.className = 'note cmsg ng'; msg.textContent = 'どの札か分からないので取り消せない。'; }
+    return;
+  }
+  if (msg) { msg.className = 'note cmsg'; msg.textContent = '取り消している…'; }
+  try {
+    await deleteLetter(rec.id, '編集長が取り消した');
+    unfile(kind, key);
+    renderBox(ST || {}, true);
+  } catch (e) {
+    failInto(fail, e, () => b.click(), 'もう一度取り消す');
+    if (msg) { msg.className = 'note cmsg ng'; msg.textContent = '取り消せていない。札は金庫に残ったまま。'; }
+  }
+});
+
+/* ================= 金庫へ置く（決裁票・答え・要件・空欄・ネタ） ================= */
+
+/* 置いた札そのものを消す。Macがまだ取りに来ていなければ、無かったことになる。
+   404＝すでに金庫に無い＝取り消しとしては成功。 */
+async function deleteLetter(id, message) {
+  const c = cfg();
+  const path = `/repos/${c.owner}/${c.repo}/contents/inbox/${id}.json`;
+  const cur = await api('GET', `${path}?ref=${encodeURIComponent(c.branch)}`);
+  if (cur.status === 200 && cur.data && cur.data.sha) {
+    const del = await api('DELETE', path, { message, branch: c.branch, sha: cur.data.sha });
+    if (del.status !== 200) throw new ApiErr(del.status, del.msg || '札を消せなかった');
+    return;
+  }
+  if (cur.status !== 404) throw new ApiErr(cur.status, cur.msg || '札を探しに行けなかった');
+}
+
+/* ---- 下書きの決裁 ---- */
 async function decide(n, want, note) {
+  const k = `kes::${n}`;
   const d = new Date();
-  const slip = {
-    id: `${stamp(d)}-kessai-${n}`, kind: 'kessai',
-    draft: n, action: want === '校了' ? 'pass' : 'reject',
-    note: note || '', from: 'boss', ts: isoLocal(d),
-  };
-  clearFail($(`#kf-${CSS.escape(n)}`));
-  REASON = '';
-  FLIGHT.kes[n] = { want };            // 押した瞬間に札と見出しを変える。通信を待たない
-  renderKessai(ST || {}, true);
+  const slip = { id: `${stamp(d)}-kessai-${n}`, kind: 'kessai',
+                 draft: n, action: want === '校了' ? 'pass' : 'reject',
+                 note: note || '', from: 'boss', ts: isoLocal(d) };
+  clearCard(k);
+  HOLD.reason = '';
+  FLIGHT.kes[n] = { want };            // 押した瞬間に札を変える。通信を待たない
+  renderBox(ST || {}, true);
   try {
     await push(`inbox/${slip.id}.json`, JSON.stringify(slip, null, 2) + '\n',
                `決裁：${n} を${want}`);
@@ -662,354 +1024,244 @@ async function decide(n, want, note) {
     pend[n] = { want, ts: slip.ts, id: slip.id, note: note || '' };
     saveKes(pend);
     delete FLIGHT.kes[n];
-    renderKessai(ST || {}, true);
+    renderBox(ST || {}, true);
   } catch (e) {
     delete FLIGHT.kes[n];              // 見た目を押す前に戻す。送れていないのに校了に見せない
-    renderKessai(ST || {}, true);
-    failInto($(`#kf-${CSS.escape(n)}`), e, () => decide(n, want, note),
-             `もう一度「${want}」を送る`);
-    const m = $(`#km-${CSS.escape(n)}`);
-    if (m) { m.className = 'note ng';
-      m.textContent = `${want}の記録は金庫に残っていない。原稿はそのまま。`; }
+    renderBox(ST || {}, true);
+    failCard(k, e, () => decide(n, want, note), `もう一度「${want}」を送る`);
+    say(k, 'ng', `${want}の記録は金庫に残っていない。原稿はそのまま。`);
   }
 }
 
-/* 金庫に置いた手紙そのものを消す。Macがまだ取りに来ていなければ、無かったことになる。
-   404＝すでに金庫に無い＝取り消しとしては成功。決裁票と取材の答えの両方が使う。 */
-async function deleteLetter(id, message) {
-  const c = cfg();
-  const path = `/repos/${c.owner}/${c.repo}/contents/inbox/${id}.json`;
-  const cur = await api('GET', `${path}?ref=${encodeURIComponent(c.branch)}`);
-  if (cur.status === 200 && cur.data && cur.data.sha) {
-    const del = await api('DELETE', path, { message, branch: c.branch, sha: cur.data.sha });
-    if (del.status !== 200) throw new ApiErr(del.status, del.msg || '手紙を消せなかった');
-    return;
-  }
-  if (cur.status !== 404) throw new ApiErr(cur.status, cur.msg || '手紙を探しに行けなかった');
-}
 
-/* 取り消し＝金庫に置いた決裁票そのものを消す。
-   Macがまだ取りに来ていなければ、無かったことになる。 */
-async function undoKes(n) {
-  const p = loadKes()[n];
-  const msg = $(`#km-${CSS.escape(n)}`);
-  clearFail($(`#kf-${CSS.escape(n)}`));
-  if (!p || !p.id) {   // アプリを新しくする前に送った分には、票の名前が残っていない
-    if (msg) { msg.className = 'note ng';
-      msg.textContent = 'どの決裁票か分からないので取り消せない（アプリを新しくする前に送った分）。'; }
-    return;
-  }
-  if (msg) { msg.className = 'note'; msg.textContent = '取り消している…'; }
-  try {
-    await deleteLetter(p.id, `決裁を取り消す：${n}`);
-    const pend = loadKes();
-    delete pend[n];
-    saveKes(pend);
-    renderKessai(ST || {}, true);
-    const m = $(`#km-${CSS.escape(n)}`);
-    if (m) { m.className = 'note ok';
-      m.textContent = '取り消した。決裁票は金庫から消えたので、係には渡らない。'; }
-  } catch (e) {
-    failInto($(`#kf-${CSS.escape(n)}`), e, () => undoKes(n), 'もう一度取り消す');
-    if (msg) { msg.className = 'note ng';
-      msg.textContent = '取り消せていない。決裁票は金庫に残ったまま。'; }
-  }
-}
-
-on('#drafts', 'click', async (ev) => {
-  const b = ev.target.closest('button');
-  if (!b) return;
-  const n = b.dataset.n;
-  if (b.classList.contains('kes-cp')) {
-    const d = (ST && ST.drafts || []).find((x) => x.n === n);
-    const msg = $(`#km-${CSS.escape(n)}`);
-    try {
-      await navigator.clipboard.writeText((d && d.body) || '');
-      msg.className = 'note ok'; msg.textContent = '本文をコピーした。Threadsに貼るのは編集長の手で。';
-    } catch (_) {
-      msg.className = 'note ng'; msg.textContent = 'この端末ではコピーできなかった。長押しで選んでくれ。';
-    }
-    return;
-  }
-  if (b.classList.contains('kes-ok'))   return decide(n, '校了', '');
-  if (b.classList.contains('kes-undo')) return undoKes(n);
-  // prompt() は、ホーム画面から開いたアプリだと出ない端末がある。画面の中で書かせる
-  if (b.classList.contains('kes-ng'))     { REASON = n;  renderKessai(ST || {}, true); return; }
-  if (b.classList.contains('kes-cancel')) { REASON = ''; renderKessai(ST || {}, true); return; }
-  if (b.classList.contains('kes-send')) {
-    const ta = document.querySelector(`[data-li="${CSS.escape(n)}"] .r-note`);
-    return decide(n, '再校', (ta && ta.value.trim()) || '');
-  }
-});
-
-/* ================= 取材（採掘係の質問に答える） =================
-   質問の本文は金庫の state.json から来る。アプリは質問を作らないし、答えも直さない。
-   ここに答えを置く → Macが取り込む → vault/episodes.md に N- が1本増える。
-   **在庫が増える道はここだけ。** そしてここでもThreadsには何も出ない（憲法4条）。 */
-
-const loadAns = () => {
-  const v = jparse(localStorage.getItem(LS.ansd), {});
-  return (v && typeof v === 'object') ? v : {};
-};
-const saveAns = (o) => put(LS.ansd, JSON.stringify(o));
-const loadShu = () => {
-  const v = jparse(localStorage.getItem(LS.shu), []);
-  return Array.isArray(v) ? v : [];
-};
-const saveShu = (a) => put(LS.shu, JSON.stringify(a.slice(0, 30)));
-
-let SHU_TYPING = '';   // いま答えを書いている質問。裏の自動更新で書きかけを消さない
-
-/* 答えを置いたあとの札。「係が読んだ」ではなく「在庫に入った」と書く。
-   ここで待っているのは返事ではなく、N-在庫が1本増えることだから。 */
+/* ---- 取材の答え。ここが N-在庫の唯一の増え口 ---- */
 function shuLine(t, n) {
   if (t.k === 'read') return n ? `${hhmm(t.ts)} に ${n} として在庫に入った（${ago(t.ts)}）`
                                : `${hhmm(t.ts)} にMacが在庫に写した（${ago(t.ts)}）`;
   if (t.k === 'recv') return `${hhmm(t.ts)} にMacが取り込んだ（${ago(t.ts)}）。在庫に写している最中`;
-  if (t.k === 'ng')   return `${hhmm(t.ts)} に在庫にできなかった。理由は社内便の「係からの返事」に出ている`;
+  if (t.k === 'ng')   return `${hhmm(t.ts)} に在庫にできなかった。理由は下の「係からの返事」に出ている`;
   const base = `${hhmm(t.ts)} に置いた（${ago(t.ts)}）`;
-  // ここで待っているのは返事ではなく、N-在庫が1本増えること。そう書く
   return t.late
     ? `${base}。${Math.floor(minsSince(t.ts))}分たっても取りに来ていない。Macが止まっているかもしれない`
     : `${base}。次にMacが動いたときにN-在庫に入る`;
 }
 
-function renderShuzai(st, force) {
-  if (!force && (SHU_TYPING || Object.keys(FLIGHT.shu).length)) return;
-  const qs = st.shuzai || [];
-  const drafts = loadAns();
-
-  // 置いた答えの手紙。この端末の控えと金庫側の一覧を突き合わせる（金庫側が正）。
-  // 端末を変えても「もう答えた」が出るように、金庫の分も見る
-  const letters = {};
-  loadShu().forEach((l) => { if (l.q) letters[l.q] = l; });
-  (st.shuzai_sent || []).forEach((l) => { if (l.q) letters[l.q] = l; });
-  // 在庫に入り終わった質問の控えは落とす（待ち札を出しっぱなしにしない）
-  const done = new Set(qs.filter((q) => q.st !== '未回答').map((q) => q.id));
-  saveShu(loadShu().filter((l) => !done.has(l.q)));
-
-  $('#shuzai').innerHTML = qs.length ? qs.map((q) => {
-    const f = FLIGHT.shu[q.id];
-    const l = letters[q.id];
-    const zumi = q.st !== '未回答';
-    const t = f ? { k: 'sending', label: '送っている…' }
-              : (zumi ? { k: 'read', label: '在庫に入った', ts: q.ans_ts }
-                      : (l ? trace(l.id, l.ts) : null));
-    const meta = [q.e && q.e !== '（指定なし）' ? `隣：${q.e}` : '',
-                  q.nerai && q.nerai !== '（無し）' ? `狙い：${q.nerai}` : ''].filter(Boolean);
-    // 在庫にできなかったときは、書いた答えを欄に戻してもう一度置けるようにする。
-    // 札だけ出して欄を閉じると、その質問に二度と答えられなくなる（行き止まり）
-    const stuck = !!(t && t.k === 'ng');
-    const kaku = !zumi && (!t || stuck);
-    const moto = drafts[q.id] || (stuck && l ? l.body : '') || '';
-    return `<li class="${t ? 's-' + t.k : ''}" data-q="${esc(q.id)}">
-      <div class="dh"><b>${esc(q.id)}</b>
-        <span class="badge ${zumi ? 'ok' : 'ng'}">${esc(zumi ? '在庫になった' : '未回答')}</span></div>
-      <div class="qt">${esc(q.q)}</div>
-      ${meta.length ? `<div class="qm">${esc(meta.join('　／　'))}</div>` : ''}
-      ${t ? `<div class="srow">${statChip(
-              // 札の言葉も取材のものに直す。ここで待っているのは返事ではなく在庫だから
-              t.k === 'ng' ? { ...t, label: '在庫にできなかった' } : t)}<span class="sline">${esc(
-              t.k === 'sending' ? '金庫に置いている…' : shuLine(t, q.n))}</span></div>` : ''}
-      ${zumi && q.n ? `<p class="note ok qn">${esc(q.n)} になった。未使用の在庫として積んである。
-        執筆係に書かせるときは、この番号を指定する。</p>` : ''}
-      ${kaku ? `
-      <label class="fld"><span>答え（このまま在庫の本文になる。話し言葉でいい）</span>
-        <textarea class="a-note" rows="4"
-          placeholder="そのとき誰が何て言ったか、そのままの言葉で。">${esc(moto)}</textarea></label>
-      <div class="btnrow">
-        <button class="btn shu-send" data-q="${esc(q.id)}">${
-          stuck ? 'もう一度、在庫にする' : 'この答えを在庫にする'}</button>
-        <button class="btn ghost shu-clear" data-q="${esc(q.id)}">消す</button>
-      </div>` : ''}
-      ${(!zumi && t && t.k === 'sent') ? `<div class="btnrow">
-        <button class="btn ghost shu-undo" data-q="${esc(q.id)}">取り消す（まだ間に合う）</button>
-      </div>` : ''}
-      <div class="failbox" id="sf-${esc(q.id)}" hidden></div>
-      <p class="note shu-msg" id="sm-${esc(q.id)}"></p>
-    </li>`;
-  }).join('')
-    // 3つを混ぜない：まだ読めていない／金庫の材料が古い／読んだ結果0問。
-    // 「読みに行っている…」が消えないまま何も押せない、が実際に起きた
-    : (st.shuzai
-        ? `<li class="empty">採掘係からの質問がまだ無い。<br>
-           Macで <code>python3 shuzai.py --new</code> を走らせると、採掘係が3問まで出してここに並ぶ。</li>`
-        : (st.generated_at
-            ? `<li class="empty">金庫の材料に取材の欄がまだ無い（Mac側が古い）。<br>
-               Macで <code>python3 state.py</code> を走らせれば、次の配達でここに出る。</li>`
-            : '<li class="empty">読みに行っている…</li>'));
-
-  SHU_WAIT = qs.filter((q) => q.st === '未回答' && !letters[q.id]).length;
-  paintKesDot();
-}
-
 async function sendAnswer(qid) {
-  const ta = document.querySelector(`[data-q="${CSS.escape(qid)}"] .a-note`);
+  const k = `shu::${qid}`;
+  const ta = inCard(k, '.a-note');
   const body = (ta && ta.value.trim()) || '';
-  const msg = $(`#sm-${CSS.escape(qid)}`);
-  clearFail($(`#sf-${CSS.escape(qid)}`));
-  if (!body) {
-    if (msg) { msg.className = 'note ng'; msg.textContent = '答えが空。'; }
-    return;
-  }
+  clearCard(k);
+  if (!body) { say(k, 'ng', '答えが空。'); return; }
   const d = new Date();
-  const letter = {
-    id: `${stamp(d)}-shuzai-${qid}`, kind: 'shuzai', q: qid,
-    from: 'boss', to: 'saikutsu', subject: `取材の答え：${qid}`,
-    body, ts: isoLocal(d),
-  };
-  SHU_TYPING = '';
-  FLIGHT.shu[qid] = letter;         // 押した瞬間に札を変える。通信を待たない
-  renderShuzai(ST || {}, true);
+  const letter = { id: `${stamp(d)}-shuzai-${qid}`, kind: 'shuzai', q: qid,
+                   from: 'boss', to: 'saikutsu', subject: `取材の答え：${qid}`,
+                   body, ts: isoLocal(d) };
+  HOLD.typing = '';
+  FLIGHT.shu[qid] = letter;
+  renderBox(ST || {}, true);
   try {
     await push(`inbox/${letter.id}.json`, JSON.stringify(letter, null, 2) + '\n',
                `取材の答え：${qid}`);
     saveShu([letter].concat(loadShu().filter((l) => l.q !== qid)));
     const dr = loadAns(); delete dr[qid]; saveAns(dr);   // 置けた分だけ書きかけを消す
     delete FLIGHT.shu[qid];
-    renderShuzai(ST || {}, true);
-    const m = $(`#sm-${CSS.escape(qid)}`);
-    if (m) { m.className = 'note ok';
-      m.textContent = '金庫に置いた。次にMacが動いたときにN-在庫に入る。Threadsには何も出ていない。'; }
+    renderBox(ST || {}, true);
   } catch (e) {
     delete FLIGHT.shu[qid];
-    renderShuzai(ST || {}, true);   // 書きかけは控えから戻る。消さない
-    failInto($(`#sf-${CSS.escape(qid)}`), e, () => sendAnswer(qid), 'もう一度置く');
-    const m = $(`#sm-${CSS.escape(qid)}`);
-    if (m) { m.className = 'note ng';
-      m.textContent = '置けていない。答えは消していない。在庫も増えていない。'; }
+    renderBox(ST || {}, true);   // 書きかけは控えから戻る。消さない
+    failCard(k, e, () => sendAnswer(qid), 'もう一度置く');
+    say(k, 'ng', '置けていない。答えは消していない。在庫も増えていない。');
   }
 }
 
-/* 取り消し。Macが取り込む前なら、答えの手紙ごと無かったことにできる */
-async function undoAnswer(qid) {
-  const l = loadShu().find((x) => x.q === qid);
-  const msg = $(`#sm-${CSS.escape(qid)}`);
-  clearFail($(`#sf-${CSS.escape(qid)}`));
-  if (!l) {
-    if (msg) { msg.className = 'note ng';
-      msg.textContent = 'どの手紙か分からないので取り消せない（この端末から送った分ではない）。'; }
-    return;
-  }
-  if (msg) { msg.className = 'note'; msg.textContent = '取り消している…'; }
+
+/* ---- 係の要件を片づける ---- */
+async function closeYoken(yid, action, note) {
+  const k = `yok::${yid}`;
+  const d = new Date();
+  const slip = { id: `${stamp(d)}-yoken-${yid}`, kind: 'yoken', y: yid,
+                 action, note: note || '', from: 'boss', ts: isoLocal(d) };
+  clearCard(k);
+  HOLD.reason = '';
+  FLIGHT.yok[yid] = { action };
+  renderBox(ST || {}, true);
   try {
-    await deleteLetter(l.id, `取材の答えを取り消す：${qid}`);
-    saveShu(loadShu().filter((x) => x.q !== qid));
-    const dr = loadAns(); dr[qid] = l.body; saveAns(dr);   // 書いたものは欄に戻す
-    renderShuzai(ST || {}, true);
-    const m = $(`#sm-${CSS.escape(qid)}`);
-    if (m) { m.className = 'note ok';
-      m.textContent = '取り消した。答えは欄に戻してある。在庫は増えていない。'; }
+    await push(`inbox/${slip.id}.json`, JSON.stringify(slip, null, 2) + '\n',
+               `要件：${yid} を${action === 'ack' ? '了解' : '却下'}`);
+    const pend = loadYok();
+    pend[yid] = { action, ts: slip.ts, id: slip.id, note: note || '' };
+    saveYok(pend);
+    delete FLIGHT.yok[yid];
+    renderBox(ST || {}, true);
   } catch (e) {
-    failInto($(`#sf-${CSS.escape(qid)}`), e, () => undoAnswer(qid), 'もう一度取り消す');
-    if (msg) { msg.className = 'note ng'; msg.textContent = '取り消せていない。手紙は金庫に残ったまま。'; }
+    delete FLIGHT.yok[yid];
+    renderBox(ST || {}, true);
+    failCard(k, e, () => closeYoken(yid, action, note), 'もう一度送る');
+    say(k, 'ng', '片づいていない。要件は箱に残ったまま。');
   }
 }
 
-on('#shuzai', 'click', (ev) => {
-  const b = ev.target.closest('button');
-  if (!b) return;
-  const q = b.dataset.q;
-  if (b.classList.contains('shu-send')) return sendAnswer(q);
-  if (b.classList.contains('shu-undo')) return undoAnswer(q);
-  if (b.classList.contains('shu-clear')) {
-    const dr = loadAns(); delete dr[q]; saveAns(dr);
-    SHU_TYPING = '';
-    renderShuzai(ST || {}, true);
-    const m = $(`#sm-${CSS.escape(q)}`);
-    if (m) { m.className = 'note'; m.textContent = '書きかけを消した。'; }
+/* ---- 在庫の空欄を埋める ---- */
+async function sendUme(n, field) {
+  const k = `hole::${n}`;
+  const key = umeKey(n, field);
+  const c = cardEl(k);
+  const wrap = c && Array.from(c.querySelectorAll('[data-f]')).find((e) => e.dataset.f === field);
+  const ta = wrap && wrap.querySelector('.u-note');
+  const body = (ta && ta.value.trim()) || '';
+  clearCard(k);
+  if (!body) { say(k, 'ng', `「${field}」が空。埋めるものが無い。`); return; }
+  const d = new Date();
+  const letter = { id: `${stamp(d)}-ume-${n}-${Date.now().toString(36)}`, kind: 'ume',
+                   n, field, from: 'boss', to: 'saikutsu',
+                   subject: `在庫の空欄：${n} の${field}`, body, ts: isoLocal(d) };
+  HOLD.typing = '';
+  FLIGHT.ume[key] = letter;
+  renderBox(ST || {}, true);
+  try {
+    await push(`inbox/${letter.id}.json`, JSON.stringify(letter, null, 2) + '\n',
+               `在庫の空欄：${n} の${field}`);
+    const pend = loadUmeP();
+    pend[key] = { id: letter.id, ts: letter.ts, body };
+    saveUmeP(pend);
+    const dr = loadUmeD(); delete dr[key]; saveUmeD(dr);
+    delete FLIGHT.ume[key];
+    renderBox(ST || {}, true);
+  } catch (e) {
+    delete FLIGHT.ume[key];
+    renderBox(ST || {}, true);
+    failCard(k, e, () => sendUme(n, field), 'もう一度置く');
+    say(k, 'ng', '置けていない。書いた言葉は消していない。在庫も変わっていない。');
   }
-});
-
-/* 書きかけは1文字ごとに端末に残す。アプリが裏に回っても、通信に失敗しても消えない。
-   書いている間は裏の自動更新で画面を組み直さない（打っている途中で消えるのを防ぐ） */
-on('#shuzai', 'input', (ev) => {
-  const ta = ev.target.closest('.a-note');
-  if (!ta) return;
-  const li = ta.closest('[data-q]');
-  if (!li) return;
-  const dr = loadAns();
-  dr[li.dataset.q] = ta.value;
-  saveAns(dr);
-  SHU_TYPING = ta.value.trim() ? li.dataset.q : '';
-});
-on('#shuzai', 'focusout', (ev) => {
-  if (ev.target.closest('.a-note')) SHU_TYPING = '';
-});
-
-/* ================= 手紙を出す（第2期） ================= */
-
-const jparse = (s, fb) => { try { return JSON.parse(s) ?? fb; } catch (_) { return fb; } };
-const loadPending = () => {
-  const v = jparse(localStorage.getItem(LS.pend), []);
-  return Array.isArray(v) ? v : [];
-};
-const savePending = (a) => put(LS.pend, JSON.stringify(a.slice(0, 30)));
-
-let ST = null;   // 最後に読めた会社の姿。送った直後に画面だけ描き直すのに使う
-
-const draftFields = () => ({
-  to: $('#m-to').value, subject: $('#m-subject').value, body: $('#m-body').value,
-});
-function saveDraft() { put(LS.draft, JSON.stringify(draftFields())); }
-function restoreDraft() {
-  const d = jparse(localStorage.getItem(LS.draft), null);
-  if (!d) return;
-  if (d.to) $('#m-to').value = d.to;
-  $('#m-subject').value = d.subject || '';
-  $('#m-body').value = d.body || '';
 }
-function clearDraft() {
-  localStorage.removeItem(LS.draft);
-  $('#m-subject').value = '';
-  $('#m-body').value = '';
-}
-['#m-to', '#m-subject', '#m-body'].forEach((s) =>
-  $(s).addEventListener('input', saveDraft));
 
-async function sendLetter() {
-  const btn = $('#m-send'), msg = $('#m-msg'), fail = $('#m-fail');
-  const to = $('#m-to').value;
-  const subject = $('#m-subject').value.trim();
-  const body = $('#m-body').value.trim();
+/* ---- ネタを放る（1行＝N-在庫1本） ---- */
+async function sendNeta() {
+  const btn = $('#n-send'), msg = $('#n-msg'), fail = $('#n-fail');
+  const body = $('#n-body').value.trim();
+  const moto = $('#n-moto').value;
   msg.className = 'note';
   clearFail(fail);
-  if (!body) { msg.className = 'note ng'; msg.textContent = '本文が空。'; return; }
-
+  if (!body) { msg.className = 'note ng'; msg.textContent = '空のまま放れない。'; return; }
   const d = new Date();
-  const letter = {
-    id: `${stamp(d)}-${to}`, from: 'boss', to, subject, body, ts: isoLocal(d),
-  };
+  const letter = { id: `${stamp(d)}-neta`, kind: 'neta', moto,
+                   from: 'boss', to: 'saikutsu', subject: 'ネタ', body, ts: isoLocal(d) };
   btn.disabled = true;
-  // 押した瞬間に、一覧の先頭へ「送っている…」で並べる。通信の返事は待たない
-  FLIGHT.letter = letter;
+  FLIGHT.neta = true;
   msg.textContent = '金庫に置いている…';
-  renderMail(ST || {});
   try {
-    await push(`inbox/${letter.id}.json`,
-               JSON.stringify(letter, null, 2) + '\n',
-               `社内便：編集長 → ${YAKU[to] || to}`);
-    savePending([letter].concat(loadPending()));
-    clearDraft();
+    await push(`inbox/${letter.id}.json`, JSON.stringify(letter, null, 2) + '\n', 'ネタを放る');
+    saveNeta([letter].concat(loadNeta()));
+    localStorage.removeItem(LS.netad);
+    $('#n-body').value = '';
     msg.className = 'note ok';
-    msg.textContent = `${YAKU[to] || to}あてに置いた。Threadsには何も出ていない。`
-                    + '下の一覧で「送った（未読）」になっている。';
+    msg.textContent = '放った。次にMacが動いたときにN-在庫が1本増える。Threadsには何も出ていない。';
   } catch (e) {
     msg.className = 'note ng';
-    msg.textContent = '送れていない。書いたものは消していない。';
-    failInto(fail, e, sendLetter, 'もう一度送る');
+    msg.textContent = '放れていない。書いたものは消していない。';
+    failInto(fail, e, sendNeta, 'もう一度放る');
   } finally {
-    FLIGHT.letter = null;
+    FLIGHT.neta = false;
     btn.disabled = false;
-    renderMail(ST || {});
+    renderBox(ST || {}, true);
   }
 }
-$('#m-send').addEventListener('click', sendLetter);
+on('#n-send', 'click', sendNeta);
+on('#n-discard', 'click', () => {
+  $('#n-body').value = '';
+  localStorage.removeItem(LS.netad);
+  $('#n-msg').className = 'note';
+  $('#n-msg').textContent = '書きかけを消した。';
+});
+on('#n-body', 'input', () => put(LS.netad, $('#n-body').value));
 
-$('#m-discard').addEventListener('click', () => {
-  clearDraft();
-  $('#m-msg').className = 'note';
-  $('#m-msg').textContent = '書きかけを消した。';
+/* 放りかけのネタは端末に残す。アプリが裏に回っても、通信に失敗しても消えない */
+function restoreNeta() {
+  const n = localStorage.getItem(LS.netad);
+  if (n) $('#n-body').value = n;
+}
+
+/* ================= 箱のボタン（1か所で受ける） ================= */
+
+async function copyBody(k, text) {
+  try {
+    await navigator.clipboard.writeText(text || '');
+    say(k, 'ok', '本文をコピーした。Threadsに貼るのは編集長の手で。');
+  } catch (_) {
+    say(k, 'ng', 'この端末ではコピーできなかった。長押しで選んでくれ。');
+  }
+}
+
+function onBoxClick(ev) {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  const li = ev.target.closest('[data-k]');
+  if (!li) return;
+  const k = li.dataset.k;
+  const [kind, id] = k.split(SEP);
+  const cls = b.classList;
+
+  if (cls.contains('a-cp')) {
+    const d = (ST && ST.drafts || []).find((x) => x.n === id);
+    return copyBody(k, d && d.body);
+  }
+  if (cls.contains('a-cancel')) { HOLD.reason = ''; return renderBox(ST || {}, true); }
+
+  if (kind === 'kes') {
+    if (cls.contains('a-kes-ok'))   return decide(id, '校了', '');
+    // prompt() は、ホーム画面から開いたアプリだと出ない端末がある。画面の中で書かせる
+    if (cls.contains('a-kes-ng'))   { HOLD.reason = k; return renderBox(ST || {}, true); }
+    if (cls.contains('a-kes-send')) {
+      const ta = inCard(k, '.r-note');
+      return decide(id, '再校', (ta && ta.value.trim()) || '');
+    }
+  }
+  if (kind === 'shu') {
+    if (cls.contains('a-shu-send')) return sendAnswer(id);
+    if (cls.contains('a-shu-clear')) {
+      const dr = loadAns(); delete dr[id]; saveAns(dr);
+      HOLD.typing = '';
+      renderBox(ST || {}, true);
+      return say(k, '', '書きかけを消した。');
+    }
+  }
+  if (kind === 'yok') {
+    if (cls.contains('a-yok-ack')) return closeYoken(id, 'ack', '');
+    if (cls.contains('a-yok-ng'))  { HOLD.reason = k; return renderBox(ST || {}, true); }
+    if (cls.contains('a-yok-send')) {
+      const ta = inCard(k, '.r-note');
+      return closeYoken(id, 'reject', (ta && ta.value.trim()) || '');
+    }
+  }
+  if (kind === 'hole' && cls.contains('a-ume-send')) {
+    const w = b.closest('[data-f]');
+    if (w) return sendUme(id, w.dataset.f);
+  }
+}
+on('#box', 'click', onBoxClick);
+on('#dama', 'click', onBoxClick);
+
+/* 書きかけは1文字ごとに端末に残す。打っている間は裏の自動更新で画面を組み直さない */
+on('#box', 'input', (ev) => {
+  const li = ev.target.closest('[data-k]');
+  if (!li) return;
+  const k = li.dataset.k;
+  const [kind, id] = k.split(SEP);
+  if (ev.target.classList.contains('a-note')) {
+    const dr = loadAns(); dr[id] = ev.target.value; saveAns(dr);
+    HOLD.typing = ev.target.value.trim() ? k : '';
+  }
+  if (ev.target.classList.contains('u-note')) {
+    const w = ev.target.closest('[data-f]');
+    if (!w) return;
+    const dr = loadUmeD(); dr[umeKey(id, w.dataset.f)] = ev.target.value; saveUmeD(dr);
+    HOLD.typing = ev.target.value.trim() ? k : '';
+  }
+  if (ev.target.classList.contains('r-note')) HOLD.reason = k;
+});
+on('#box', 'focusout', (ev) => {
+  if (ev.target.classList && ev.target.classList.contains('a-note')) HOLD.typing = '';
+  if (ev.target.classList && ev.target.classList.contains('u-note')) HOLD.typing = '';
 });
 
 /* ================= 台帳 ================= */
@@ -1237,7 +1489,7 @@ async function selftest() {
         : { status: 0, msg: 'shaが返ってこなかった' };
       say(`⑤ 後始末 …… ${del.status === 200 ? '○ 消した'
                         : `△ ${del.status} 試しファイルが金庫に残った`}`);
-      return fin('ok', '', '→ この鍵は書ける。社内便は通る。');
+      return fin('ok', '', '→ この鍵は書ける。決裁箱の札は金庫に置ける。');
     }
     return fin('ng', `④ 書き …… ✕ ${wr.status} ${wr.msg}`, '',
       wr.status === 403
@@ -1411,20 +1663,19 @@ const INSTALLED = installKeyFromURL();
 
 /* ================= 起動 ================= */
 
-restoreDraft();
+restoreNeta();
 paintKeyBanner();
 paintKeyState();
 $$('[data-howto]').forEach((el) => { el.innerHTML = HOWTO; });   // 仕組みの説明
-renderMail({});   // 金庫に置いたが未反映の手紙は、会社が読めなくても出す
-renderShuzai({}); // 質問は金庫から来る。読めるまでは「まだ無い」ではなく空欄のまま出す
+renderMail({});   // 返事の枠は、会社が読めていなくても先に出す
+renderBox({});    // 要件も質問も金庫から来る。読めるまでは空欄のまま枠だけ出す
 
 /* 「3分前」は放っておくと3分前のまま固まる。待っている画面ほど、そこが効く。
-   書きかけ・通信中は renderKessai 側が自分で降りる。 */
+   書きかけ・通信中は renderBox 側が自分で降りる。 */
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   renderMail(ST || {});
-  renderShuzai(ST || {});
-  renderKessai(ST || {});
+  renderBox(ST || {});
 }, 30000);
 $('#iso').innerHTML = '<div class="isoskel">社屋を取りに行っている…</div>';
 refresh(false);

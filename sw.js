@@ -1,9 +1,9 @@
 /* 圏外でも画面の枠だけは出るようにする。会社のデータ（api.github.com）は絶対にキャッシュしない。 */
-const V = 'aomushi-v16';  // 枠のファイルを触ったら必ず上げる（v16＝決裁タブに取材の質問と答え）
+const V = 'aomushi-v17';  // 枠のファイルを触ったら必ず上げる（v17＝決裁箱に一本化・毎朝の点呼）
 // index.html が読むのと同じURL（?v16つき）を先に取る。ここを素の './app.js' にすると、
 // 圏外のとき index.html が要求する './app.js?v16' がキャッシュに無くて画面が死ぬ
 const SHELL = [
-  './', './index.html', './style.css?v16', './app.js?v16', './config.js',
+  './', './index.html', './style.css?v17', './app.js?v17', './config.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png',
   './icons/icon-512-maskable.png',
 ];
